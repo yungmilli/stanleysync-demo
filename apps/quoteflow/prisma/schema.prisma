@@ -1,0 +1,1093 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ServiceType {
+  CALIBRATION
+  REPAIR
+  CUSTOM_SERVICE
+  OTHER
+}
+
+enum ServiceMode {
+  IN_LAB
+  ON_SITE
+  SHIP_IN
+}
+
+enum QuoteStatus {
+  NEW
+  REVIEWING
+  NEEDS_MORE_INFO
+  QUOTED
+  ACCEPTED
+  DECLINED
+  CONVERTED
+  CONVERTED_TO_WORK_ORDER_DRAFT
+  CLOSED
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TicketType {
+  CALIBRATION
+  REPAIR
+  FIELD_SERVICE
+  CUSTOM_SERVICE
+  OTHER
+}
+
+enum TicketStatus {
+  NEW
+  SCHEDULED
+  IN_PROGRESS
+  WAITING_ON_CUSTOMER
+  WAITING_ON_PARTS
+  COMPLETED
+  INVOICE_PENDING
+  INVOICED
+  CLOSED
+}
+
+enum ProjectStatus {
+  DRAFT
+  READY
+  PUBLISHED
+}
+
+enum ActivityType {
+  QUOTE_SUBMITTED
+  AI_SUMMARY_GENERATED
+  EMAIL_SENT
+  QUOTE_STATUS_CHANGED
+  WORK_ORDER_DRAFT_CREATED
+  WORK_ORDER_DRAFT_EXPORTED
+  QUOTE_CONVERTED_TO_TICKET
+  TICKET_CREATED
+  ASSIGNMENT_CHANGED
+  DUE_DATE_CHANGED
+  TICKET_STATUS_CHANGED
+  TICKET_COMPLETED
+  ADMIN_NOTE_UPDATED
+  PROJECT_CREATED
+  PROJECT_UPDATED
+  TICKET_COMMENT_ADDED
+  IDEA_POST_CREATED
+  IDEA_STATUS_CHANGED
+  CAL_ASSET_CREATED
+  CAL_WORK_ORDER_CREATED
+  CAL_WORK_ORDER_STATUS_CHANGED
+  CAL_WORK_ORDER_NOTE_ADDED
+  CERTIFICATE_DRAFT_CREATED
+  INVOICE_CREATED
+  INVOICE_STATUS_CHANGED
+  WORKFLOW_STAGE_UPDATED
+}
+
+enum AssetType {
+  TORQUE
+  PRESSURE
+  LOAD
+  DIMENSIONAL
+  ELECTRICAL
+  TEMPERATURE
+  MASS
+  OTHER
+}
+
+enum AssetStatus {
+  IN_TOLERANCE
+  DUE_SOON
+  OVERDUE
+  OOT
+  REPAIR_HOLD
+}
+
+enum CalibrationIntervalUnit {
+  DAYS
+  MONTHS
+  YEARS
+}
+
+enum CalServiceType {
+  CALIBRATION
+  REPAIR
+  ADJUSTMENT
+  DATA_ONLY
+  ONSITE
+}
+
+enum CalibrationWorkOrderStatus {
+  RECEIVED
+  IN_PROCESS
+  CALIBRATION_COMPLETE
+  TECHNICAL_REVIEW
+  CERTIFICATE_READY
+  INVOICE_PENDING
+  INVOICED
+  CLOSED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  IN_PROGRESS
+  PENDING_PAYMENT
+  PAID
+  ON_HOLD
+  VOID
+}
+
+enum WorkflowModule {
+  QUOTEFLOW
+  WORKFLOW
+  CALOPS
+}
+
+enum CertificateStatus {
+  DRAFT
+  READY
+  ISSUED
+}
+
+enum CalibrationDecision {
+  PASS
+  FAIL
+  ADJUSTED_PASS
+  REVIEW_REQUIRED
+  NOT_EVALUATED
+}
+
+enum RecallStatus {
+  OPEN
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum AssetHistoryType {
+  CREATED
+  CALIBRATED
+  REPAIRED
+  OOT_FOUND
+  RECALL_SENT
+  NOTE
+  STANDARD_LINKED
+}
+
+enum ExportPackageType {
+  WORK_ORDER_PACKAGE
+  CERTIFICATE
+}
+
+enum BusinessType {
+  GENERAL_SERVICE
+  AUTO_REPAIR
+  CONTRACTOR_FIELD_SERVICE
+  CALIBRATION_LAB
+  CUSTOM
+}
+
+enum WorkOrderDraftStatus {
+  DRAFT
+  READY_TO_EXPORT
+  EXPORTED
+}
+
+enum IntegrationExportStatus {
+  SUCCESS
+  FAILED
+}
+
+enum UserRole {
+  SYSTEM_OWNER
+  ADMIN
+  MANAGER
+  TECHNICIAN
+  SALES
+  DEMO_USER
+}
+
+enum IdeaStatus {
+  NEW
+  REVIEWING
+  PLANNED
+  DONE
+  ARCHIVED
+}
+
+enum NotificationEventType {
+  NEW_QUOTE_SUBMITTED
+  QUOTE_SUBMITTED
+  QUOTE_REVIEWED
+  QUOTE_APPROVED
+  QUOTE_ACCEPTED
+  JOB_CREATED
+  JOB_ASSIGNED
+  JOB_COMPLETED
+  WORK_ORDER_DUE
+  INVOICE_CREATED
+  INVOICE_SENT
+  PAYMENT_LINK_GENERATED
+  CERTIFICATE_READY
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+model Customer {
+  id          String          @id @default(cuid())
+  customerRef String          @unique
+  company     String
+  mainContact String
+  email       String          @unique
+  phone       String?
+  address     String?
+  notes       String?
+  workspaceId String?
+  labId       String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  workspace   BusinessWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  lab         Lab?             @relation(fields: [labId], references: [id], onDelete: SetNull)
+  quotes      QuoteRequest[]
+  workOrderDrafts WorkOrderDraft[]
+  tickets     Ticket[]
+  invoices    Invoice[]
+  activities  ActivityLog[]
+  calAssets   CalAsset[]
+  calibrationWorkOrders CalibrationWorkOrder[]
+  certificateDrafts CertificateDraft[]
+
+  @@index([workspaceId])
+  @@index([labId])
+}
+
+model QuoteRequest {
+  id                        String            @id @default(cuid())
+  quoteNumber               String            @unique
+  workspaceId               String?
+  customerId                String
+  assignedUserId            String?
+  serviceType               ServiceType
+  status                    QuoteStatus       @default(NEW)
+  priority                  Priority          @default(NORMAL)
+  suggestedPriority         Priority?
+  suggestedTicketType       TicketType?
+  assignedTo                String?
+  requestedTurnaround       String?
+  targetDueDate             DateTime?
+  serviceMode               ServiceMode?
+  equipmentType             String?
+  manufacturer              String?
+  modelNumber               String?
+  serialNumber              String?
+  unitCount                 Int?
+  rangeOrCapacity           String?
+  units                     String?
+  documentationRequirements String?
+  issueDescription          String?
+  aiSummary                 String
+  structuredSummary         Json
+  extractedFields           Json
+  transcript                Json
+  adminNotes                String?
+  quotedAmount              Float?
+  submittedAt               DateTime          @default(now())
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
+  workspace                 BusinessWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  customer                  Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  assignedUser              User?             @relation("AssignedQuotes", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  attachments               QuoteAttachment[]
+  workOrderDraft            WorkOrderDraft?
+  internalNotes             InternalNote[]
+  ticket                    Ticket?
+  invoices                  Invoice[]
+  activities                ActivityLog[]
+
+  @@index([workspaceId])
+  @@index([assignedUserId])
+}
+
+model QuoteAttachment {
+  id             String       @id @default(cuid())
+  quoteRequestId String
+  fileName       String
+  filePath       String
+  mimeType       String?
+  sizeBytes      Int?
+  createdAt      DateTime     @default(now())
+  quoteRequest   QuoteRequest @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+}
+
+model Ticket {
+  id            String         @id @default(cuid())
+  ticketNumber  String         @unique
+  quoteId       String?        @unique
+  workspaceId   String?
+  customerId    String
+  assignedUserId String?
+  type          TicketType
+  status        TicketStatus   @default(NEW)
+  priority      Priority       @default(NORMAL)
+  assignedTo    String?
+  dueDate       DateTime?
+  estimatedHours Float?
+  actualHours   Float?
+  laborRate     Float?
+  materialsCost Float?         @default(0)
+  shippingCost  Float?         @default(0)
+  quotedAmount  Float?
+  billedAmount  Float?
+  totalCost     Float?
+  profitLoss    Float?
+  marginPercent Float?
+  notes         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  completedAt   DateTime?
+  workspace     BusinessWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  customer      Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  assignedUser  User?          @relation("AssignedTickets", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  quote         QuoteRequest?  @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  invoices      Invoice[]
+  activities    ActivityLog[]
+  comments      TicketComment[]
+
+  @@index([workspaceId])
+  @@index([assignedUserId])
+}
+
+model WorkOrderDraft {
+  id                        String                  @id @default(cuid())
+  draftNumber               String                  @unique
+  sourceQuoteRequestId      String                  @unique
+  customerId                String
+  status                    WorkOrderDraftStatus    @default(DRAFT)
+  requestedServiceType      ServiceType
+  calibrationCategory       String?
+  serviceMode               ServiceMode?
+  companyName               String
+  contactName               String
+  contactEmail              String
+  contactPhone              String?
+  equipmentType             String?
+  manufacturer              String?
+  modelNumber               String?
+  serialNumber              String?
+  unitCount                 Int?
+  rangeOrCapacity           String?
+  units                     String?
+  requestedTurnaround       String?
+  documentationRequirements String?
+  customerNotes             String?
+  internalNotesSummary      String?
+  exportPayload             Json
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+  customer                  Customer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  sourceQuoteRequest        QuoteRequest            @relation(fields: [sourceQuoteRequestId], references: [id], onDelete: Cascade)
+  internalNotes             InternalNote[]
+  exportLogs                IntegrationExportLog[]
+}
+
+model IntegrationExportLog {
+  id               String                  @id @default(cuid())
+  workOrderDraftId String
+  targetSystem     String
+  status           IntegrationExportStatus
+  actor            String?
+  message          String?
+  payload          Json
+  exportedAt       DateTime                @default(now())
+  workOrderDraft   WorkOrderDraft          @relation(fields: [workOrderDraftId], references: [id], onDelete: Cascade)
+}
+
+model InternalNote {
+  id               String          @id @default(cuid())
+  body             String
+  author           String?
+  quoteRequestId   String?
+  workOrderDraftId String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  quoteRequest     QuoteRequest?   @relation(fields: [quoteRequestId], references: [id], onDelete: Cascade)
+  workOrderDraft   WorkOrderDraft? @relation(fields: [workOrderDraftId], references: [id], onDelete: Cascade)
+}
+
+model Invoice {
+  id                     String                  @id @default(cuid())
+  invoiceNumber          String                  @unique
+  workspaceId            String?
+  customerId             String
+  quoteId                String?
+  ticketId               String?
+  calibrationWorkOrderId String?
+  status                 InvoiceStatus           @default(DRAFT)
+  subtotal               Float                   @default(0)
+  tax                    Float                   @default(0)
+  discount               Float                   @default(0)
+  total                  Float                   @default(0)
+  dueDate                DateTime?
+  notes                  String?
+  paymentUrl             String?
+  paymentStatus          String                  @default("UNPAID")
+  paymentProvider        String?
+  paymentInstructions    String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  sentAt                 DateTime?
+  paidAt                 DateTime?
+  workspace              BusinessWorkspace?      @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  customer               Customer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  quote                  QuoteRequest?           @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  ticket                 Ticket?                 @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  calibrationWorkOrder   CalibrationWorkOrder?   @relation(fields: [calibrationWorkOrderId], references: [id], onDelete: SetNull)
+  lineItems              InvoiceLineItem[]
+  activities             ActivityLog[]
+
+  @@index([workspaceId])
+  @@index([customerId])
+  @@index([quoteId])
+  @@index([ticketId])
+  @@index([calibrationWorkOrderId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+model InvoiceLineItem {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  description String
+  quantity    Float    @default(1)
+  unitPrice   Float    @default(0)
+  amount      Float    @default(0)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([sortOrder])
+}
+
+model WorkflowStage {
+  id          String             @id @default(cuid())
+  workspaceId String?
+  module      WorkflowModule
+  key         String
+  label       String
+  sortOrder   Int                @default(0)
+  isEnabled   Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  workspace   BusinessWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, module, key])
+  @@index([workspaceId])
+  @@index([module])
+  @@index([sortOrder])
+}
+
+model User {
+  id              String          @id @default(cuid())
+  name            String
+  email           String          @unique
+  role            UserRole
+  passwordHash    String
+  isActive        Boolean         @default(true)
+  activeWorkspaceId String?
+  labId           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  activeWorkspace BusinessWorkspace? @relation("ActiveWorkspaceUsers", fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
+  lab             Lab?            @relation(fields: [labId], references: [id], onDelete: SetNull)
+  assignedQuotes  QuoteRequest[]  @relation("AssignedQuotes")
+  assignedTickets Ticket[]        @relation("AssignedTickets")
+  ticketComments  TicketComment[]
+  ideasCreated    IdeaPost[]      @relation("IdeaCreatedBy")
+  ideasOwned      IdeaPost[]      @relation("IdeaOwnedBy")
+  ideaComments    IdeaComment[]
+  assignedCalibrationWorkOrders CalibrationWorkOrder[] @relation("AssignedCalibrationWorkOrders")
+  calibrationRecords CalibrationRecordEntry[]
+  calibrationFindings CalibrationFinding[]
+  calActivityLogs CalActivityLog[]
+  assetHistoryEvents AssetHistoryEvent[]
+  packageExports WorkOrderPackageExport[]
+
+  @@index([activeWorkspaceId])
+  @@index([labId])
+}
+
+model TicketComment {
+  id           String   @id @default(cuid())
+  ticketId     String
+  authorUserId String
+  body         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  ticket       Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author       User     @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@index([authorUserId])
+}
+
+model IdeaPost {
+  id              String        @id @default(cuid())
+  title           String
+  description     String
+  category        String
+  priority        Priority      @default(NORMAL)
+  status          IdeaStatus    @default(NEW)
+  createdByUserId String
+  ownerUserId     String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  createdBy       User          @relation("IdeaCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  owner           User?         @relation("IdeaOwnedBy", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  comments        IdeaComment[]
+
+  @@index([status])
+  @@index([category])
+  @@index([ownerUserId])
+}
+
+model IdeaComment {
+  id           String   @id @default(cuid())
+  postId       String
+  authorUserId String
+  body         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  post         IdeaPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author       User     @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([authorUserId])
+}
+
+model Client {
+  id           String           @id @default(cuid())
+  name         String           @unique
+  industry     String?
+  serviceArea  String?
+  contactEmail String?
+  contactPhone String?
+  notes        String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  projects     WebsiteProject[]
+}
+
+model ProjectTemplate {
+  id          String           @id @default(cuid())
+  key         String           @unique
+  name        String
+  description String?
+  category    String?
+  config      Json
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  projects    WebsiteProject[]
+}
+
+model WebsiteProject {
+  id               String          @id @default(cuid())
+  workspaceId      String?
+  clientId         String
+  templateId       String
+  name             String
+  slug             String          @unique
+  status           ProjectStatus   @default(DRAFT)
+  businessName     String
+  industry         String?
+  services         Json
+  serviceArea      String?
+  contactInfo      Json
+  brandSettings    Json
+  socialLinks      Json?
+  testimonials     Json?
+  faqs             Json?
+  galleryImages    Json?
+  generatedContent Json
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  workspace        BusinessWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  client           Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  template         ProjectTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId])
+}
+
+model ActivityLog {
+  id          String       @id @default(cuid())
+  type        ActivityType
+  entityType  String
+  entityId    String
+  title       String
+  description String
+  actor       String?
+  payload     Json?
+  customerId  String?
+  quoteId     String?
+  ticketId    String?
+  invoiceId   String?
+  createdAt   DateTime     @default(now())
+  customer    Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  quote       QuoteRequest? @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  ticket      Ticket?      @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  invoice     Invoice?     @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+}
+
+model Lab {
+  id            String        @id @default(cuid())
+  labCode       String        @unique
+  name          String
+  address       String?
+  phone         String?
+  accreditation String?
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  customers     Customer[]
+  users         User[]
+  assets        CalAsset[]
+  procedures    CalibrationProcedure[]
+  standards     CalibrationStandard[]
+  workOrders    CalibrationWorkOrder[]
+  certificates  CertificateDraft[]
+
+  @@index([isActive])
+}
+
+model BusinessWorkspace {
+  id                String        @id @default(cuid())
+  workspaceKey      String        @unique
+  businessName      String
+  businessType      BusinessType
+  industry          String?
+  serviceCategories Json
+  email             String?
+  phone             String?
+  website           String?
+  address           String?
+  logoPlaceholder   String?
+  logoUrl           String?
+  invoiceTerms      String?
+  quoteTerms        String?
+  setupCompletedAt  DateTime?
+  themeAccent       String?
+  brandColors       Json
+  enabledModules    Json
+  isActive          Boolean       @default(true)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  activeUsers       User[]        @relation("ActiveWorkspaceUsers")
+  customers         Customer[]
+  quotes            QuoteRequest[]
+  tickets           Ticket[]
+  websiteProjects   WebsiteProject[]
+  invoices          Invoice[]
+  assets            CalAsset[]
+  procedures        CalibrationProcedure[]
+  standards         CalibrationStandard[]
+  workOrders        CalibrationWorkOrder[]
+  certificates      CertificateDraft[]
+  workflowStages    WorkflowStage[]
+  dashboardWidgets  DashboardWidgetPreference[]
+  notificationEvents NotificationEvent[]
+  auditEvents       AuditEvent[]
+
+  @@index([businessType])
+  @@index([isActive])
+}
+
+model DashboardWidgetPreference {
+  id          String            @id @default(cuid())
+  workspaceId String
+  widgetKey   String
+  title       String
+  isVisible   Boolean           @default(true)
+  sortOrder   Int               @default(0)
+  size        String            @default("standard")
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  workspace   BusinessWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, widgetKey])
+  @@index([workspaceId])
+  @@index([sortOrder])
+}
+
+model NotificationEvent {
+  id          String                @id @default(cuid())
+  workspaceId String?
+  type        NotificationEventType
+  status      NotificationStatus    @default(PENDING)
+  recipient   String?
+  subject     String
+  provider    String                @default("placeholder")
+  payload     Json?
+  error       String?
+  createdAt   DateTime              @default(now())
+  sentAt      DateTime?
+  workspace   BusinessWorkspace?    @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model AuditEvent {
+  id          String              @id @default(cuid())
+  workspaceId String?
+  actorUserId String?
+  actorEmail  String?
+  action      String
+  entityType  String
+  entityId    String?
+  summary     String
+  payload     Json?
+  createdAt   DateTime            @default(now())
+  workspace   BusinessWorkspace?  @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([actorUserId])
+  @@index([entityType])
+  @@index([createdAt])
+}
+
+model CalAsset {
+  id                  String        @id @default(cuid())
+  assetId             String        @unique
+  workspaceId         String?
+  labId               String?
+  customerId          String
+  description         String
+  manufacturer        String?
+  model               String?
+  serialNumber        String?
+  assetType           AssetType
+  capacityRange       String?
+  accuracyTolerance   String?
+  procedureId         String?
+  calibrationInterval Int?
+  intervalUnit        CalibrationIntervalUnit @default(MONTHS)
+  lastCalDate         DateTime?
+  dueDate             DateTime?
+  status              AssetStatus  @default(IN_TOLERANCE)
+  parentAssetId       String?
+  notes               String?
+  history             String?
+  attachmentsNote     String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  workspace           BusinessWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  lab                 Lab?          @relation(fields: [labId], references: [id], onDelete: SetNull)
+  customer            Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  procedure           CalibrationProcedure? @relation(fields: [procedureId], references: [id], onDelete: SetNull)
+  parentAsset         CalAsset?     @relation("AssetHierarchy", fields: [parentAssetId], references: [id], onDelete: SetNull)
+  childAssets         CalAsset[]    @relation("AssetHierarchy")
+  standards           CalibrationStandard[] @relation("AssetStandards")
+  workOrderLinks      CalibrationWorkOrderAsset[]
+  certificateDrafts   CertificateDraft[]
+  recalls             AssetRecall[]
+  historyEvents       AssetHistoryEvent[]
+
+  @@index([workspaceId])
+  @@index([labId])
+  @@index([customerId])
+  @@index([procedureId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([assetType])
+}
+
+model CalibrationProcedure {
+  id                    String        @id @default(cuid())
+  workspaceId           String?
+  labId                 String?
+  procedureNumber       String        @unique
+  title                 String
+  discipline            String
+  revision              String
+  controlledIssueDate   DateTime
+  uncertaintyReference  String?
+  instructions          String?
+  isActive              Boolean       @default(true)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  workspace             BusinessWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  lab                   Lab?          @relation(fields: [labId], references: [id], onDelete: SetNull)
+  assets                CalAsset[]
+  standards             CalibrationStandard[] @relation("ProcedureStandards")
+  workOrders            CalibrationWorkOrder[]
+
+  @@index([workspaceId])
+  @@index([labId])
+  @@index([discipline])
+  @@index([isActive])
+}
+
+model CalibrationStandard {
+  id                 String        @id @default(cuid())
+  workspaceId        String?
+  labId              String?
+  standardId         String        @unique
+  description        String
+  traceabilitySource String?
+  certNumber         String?
+  dueDate            DateTime?
+  uncertainty        String?
+  notes              String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  workspace          BusinessWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  lab                Lab?          @relation(fields: [labId], references: [id], onDelete: SetNull)
+  procedures         CalibrationProcedure[] @relation("ProcedureStandards")
+  assets             CalAsset[] @relation("AssetStandards")
+  workOrderLinks     CalibrationWorkOrderStandard[]
+
+  @@index([workspaceId])
+  @@index([labId])
+  @@index([dueDate])
+}
+
+model CalibrationWorkOrder {
+  id                 String        @id @default(cuid())
+  workspaceId        String?
+  labId              String?
+  woNumber           String        @unique
+  customerId         String
+  serviceType        CalServiceType
+  assignedUserId     String?
+  assignedTechnician String?
+  dueDate            DateTime?
+  priority           Priority      @default(NORMAL)
+  status             CalibrationWorkOrderStatus @default(RECEIVED)
+  procedureId        String?
+  intakeNotes        String?
+  calibrationData    String?
+  uncertaintyNotes   String?
+  certificateNotes   String?
+  revenueAmount      Float?
+  completedAt        DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  workspace          BusinessWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  lab                Lab?          @relation(fields: [labId], references: [id], onDelete: SetNull)
+  customer           Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  assignedUser       User?         @relation("AssignedCalibrationWorkOrders", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  procedure          CalibrationProcedure? @relation(fields: [procedureId], references: [id], onDelete: SetNull)
+  assets             CalibrationWorkOrderAsset[]
+  standards          CalibrationWorkOrderStandard[]
+  records            CalibrationRecordEntry[]
+  findings           CalibrationFinding[]
+  activities         CalActivityLog[]
+  certificateDraft   CertificateDraft?
+  packageExports     WorkOrderPackageExport[]
+  assetHistoryEvents AssetHistoryEvent[]
+  invoices           Invoice[]
+
+  @@index([workspaceId])
+  @@index([labId])
+  @@index([customerId])
+  @@index([assignedUserId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([procedureId])
+}
+
+model CalibrationWorkOrderAsset {
+  id          String        @id @default(cuid())
+  workOrderId String
+  assetId     String
+  asFound     String?
+  asLeft      String?
+  passFail    String?
+  createdAt   DateTime      @default(now())
+  workOrder   CalibrationWorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  asset       CalAsset      @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([workOrderId, assetId])
+  @@index([assetId])
+}
+
+model CalibrationWorkOrderStandard {
+  id          String        @id @default(cuid())
+  workOrderId String
+  standardId  String
+  usageNotes  String?
+  createdAt   DateTime      @default(now())
+  workOrder   CalibrationWorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  standard    CalibrationStandard @relation(fields: [standardId], references: [id], onDelete: Cascade)
+
+  @@unique([workOrderId, standardId])
+  @@index([standardId])
+}
+
+model CalibrationRecordEntry {
+  id            String        @id @default(cuid())
+  workOrderId   String
+  enteredByUserId String?
+  label         String
+  nominalValue  Float?
+  asFoundValue  Float?
+  asFound       String?
+  asLeftValue   Float?
+  asLeft        String?
+  toleranceLow  Float?
+  toleranceHigh Float?
+  tolerance     String?
+  units         String?
+  result        String?
+  decision      CalibrationDecision @default(NOT_EVALUATED)
+  isOutOfTolerance Boolean @default(false)
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  workOrder     CalibrationWorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  enteredBy     User?         @relation(fields: [enteredByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workOrderId])
+  @@index([enteredByUserId])
+}
+
+model AssetRecall {
+  id          String       @id @default(cuid())
+  assetId     String
+  dueDate     DateTime
+  recallDate  DateTime
+  status      RecallStatus @default(OPEN)
+  method      String?
+  message     String?
+  completedAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  asset       CalAsset      @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId])
+  @@index([dueDate])
+  @@index([status])
+}
+
+model AssetHistoryEvent {
+  id          String        @id @default(cuid())
+  assetId     String
+  workOrderId String?
+  actorUserId String?
+  type        AssetHistoryType
+  title       String
+  description String
+  createdAt   DateTime      @default(now())
+  asset       CalAsset       @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  workOrder   CalibrationWorkOrder? @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
+  actor       User?          @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([assetId])
+  @@index([workOrderId])
+  @@index([actorUserId])
+  @@index([type])
+}
+
+model WorkOrderPackageExport {
+  id          String        @id @default(cuid())
+  workOrderId String
+  exportedByUserId String?
+  packageType ExportPackageType
+  title       String
+  format      String        @default("PRINT_PDF")
+  notes       String?
+  createdAt   DateTime      @default(now())
+  workOrder   CalibrationWorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  exportedBy  User?         @relation(fields: [exportedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workOrderId])
+  @@index([exportedByUserId])
+  @@index([packageType])
+}
+
+model CalibrationFinding {
+  id            String        @id @default(cuid())
+  workOrderId   String
+  authorUserId  String?
+  findingType   String
+  severity      String?
+  description   String
+  correctiveAction String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  workOrder     CalibrationWorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  author        User?         @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workOrderId])
+  @@index([authorUserId])
+}
+
+model CalActivityLog {
+  id          String        @id @default(cuid())
+  workOrderId String
+  actorUserId String?
+  title       String
+  description String
+  createdAt   DateTime      @default(now())
+  workOrder   CalibrationWorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  actor       User?         @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workOrderId])
+  @@index([actorUserId])
+}
+
+model CertificateDraft {
+  id                    String        @id @default(cuid())
+  certificateNumber     String        @unique
+  workOrderId           String        @unique
+  customerId            String
+  workspaceId           String?
+  labId                 String?
+  assetId               String?
+  status                CertificateStatus @default(DRAFT)
+  accreditationStatement String?
+  environmentalConditions String?
+  calibrationMethod     String?
+  asFoundSummary        String?
+  asLeftSummary         String?
+  passFail              String?
+  statementOfConformity String?
+  decisionRule          String?
+  notes                 String?
+  uncertaintyStatement  String?
+  traceabilityStatement String?
+  authorizedReviewer    String?
+  issueDate             DateTime?
+  revision              String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  workspace             BusinessWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  workOrder             CalibrationWorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  customer              Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  lab                   Lab?          @relation(fields: [labId], references: [id], onDelete: SetNull)
+  asset                 CalAsset?     @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([labId])
+  @@index([customerId])
+  @@index([assetId])
+  @@index([status])
+}

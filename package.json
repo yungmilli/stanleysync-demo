@@ -1,0 +1,25 @@
+{
+  "name": "stanleysync-suite",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/quoteflow"
+  ],
+  "scripts": {
+    "postinstall": "npm --workspace @stanleysync/quoteflow run db:generate",
+    "dev": "npm --workspace @stanleysync/quoteflow run dev",
+    "build": "npm --workspace @stanleysync/quoteflow run build",
+    "build:production": "npm --workspace @stanleysync/quoteflow run build",
+    "start": "npm --workspace @stanleysync/quoteflow run start",
+    "start:production": "npm --workspace @stanleysync/quoteflow run start",
+    "lint": "npm --workspace @stanleysync/quoteflow run lint",
+    "typecheck": "npm --workspace @stanleysync/quoteflow run typecheck",
+    "db:generate": "npm --workspace @stanleysync/quoteflow run db:generate",
+    "db:migrate": "npm --workspace @stanleysync/quoteflow run db:migrate",
+    "db:deploy": "npm --workspace @stanleysync/quoteflow run db:deploy",
+    "db:seed": "npm --workspace @stanleysync/quoteflow run db:seed",
+    "seed:demo": "npm --workspace @stanleysync/quoteflow run seed:demo",
+    "verify:demo": "node scripts/verify-demo.mjs",
+    "prisma:validate": "npm --workspace @stanleysync/quoteflow run prisma:validate"
+  }
+}
