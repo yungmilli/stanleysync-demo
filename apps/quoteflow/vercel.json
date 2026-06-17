@@ -1,5 +1,5 @@
 {
   "framework": "nextjs",
-  "installCommand": "npm install --workspaces=false --include=optional",
+  "installCommand": "npm install --workspaces=false",
   "buildCommand": "npm run build"
 }
