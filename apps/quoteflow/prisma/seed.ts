@@ -1178,22 +1178,20 @@ async function main() {
   await seedDashboardPreferences(workspaces);
 
   const ownerUser = await createUser({
-    name: "StanleySync Owner",
-    email: "owner@stanleysync.app",
+    name: "Mason Stanley",
+    email: "masonstanley@stanleysync.com",
     role: UserRole.SYSTEM_OWNER,
     password: "Stanley123!",
+  });
+
+  await prisma.user.updateMany({
+    where: { email: "owner@stanleysync.app" },
+    data: { isActive: false },
   });
 
   const adminUser = await createUser({
     name: "Avery Stone",
     email: "admin@stanleysync.app",
-    role: UserRole.ADMIN,
-    password: "Stanley123!",
-  });
-
-  const pilotAdminUser = await createUser({
-    name: "Mason Stanley",
-    email: "masonstanley@stanleysync.com",
     role: UserRole.ADMIN,
     password: "Stanley123!",
   });
@@ -1233,11 +1231,6 @@ async function main() {
 
   await prisma.user.update({
     where: { id: adminUser.id },
-    data: { activeWorkspaceId: workspaces.general.id },
-  });
-
-  await prisma.user.update({
-    where: { id: pilotAdminUser.id },
     data: { activeWorkspaceId: workspaces.general.id },
   });
 
