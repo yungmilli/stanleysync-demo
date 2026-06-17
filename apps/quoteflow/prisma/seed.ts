@@ -1191,6 +1191,13 @@ async function main() {
     password: "Stanley123!",
   });
 
+  const pilotAdminUser = await createUser({
+    name: "Mason Stanley",
+    email: "masonstanley@stanleysync.com",
+    role: UserRole.ADMIN,
+    password: "Stanley123!",
+  });
+
   const managerUser = await createUser({
     name: "Mason Brooks",
     email: "manager@stanleysync.app",
@@ -1226,6 +1233,11 @@ async function main() {
 
   await prisma.user.update({
     where: { id: adminUser.id },
+    data: { activeWorkspaceId: workspaces.general.id },
+  });
+
+  await prisma.user.update({
+    where: { id: pilotAdminUser.id },
     data: { activeWorkspaceId: workspaces.general.id },
   });
 
