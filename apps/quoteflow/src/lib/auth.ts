@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { UserRole } from "@prisma/client";
+import { UserRole, type User } from "@prisma/client";
 import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { getServerSession } from "next-auth";
@@ -16,11 +16,38 @@ const credentialsSchema = z.object({
 function fallbackAdminUser() {
   return {
     id: "env-admin",
-    name: "StanleySync Admin",
+    name: "Mason Stanley",
     email: env.ADMIN_EMAIL,
-    role: UserRole.ADMIN,
+    role: UserRole.SYSTEM_OWNER,
     isActive: true,
   };
+}
+
+function logOwnerAuthDiagnostic(
+  result: string,
+  details: {
+    databaseLookupSucceeded: boolean;
+    databaseUserExists: boolean;
+    databaseUserActive: boolean | null;
+  },
+) {
+  console.info("[auth:owner-diagnostic]", {
+    result,
+    hasAdminEmail: Boolean(process.env.ADMIN_EMAIL),
+    hasAdminPassword: Boolean(process.env.ADMIN_PASSWORD),
+    hasAdminPasswordHash: Boolean(process.env.ADMIN_PASSWORD_HASH),
+    hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
+    ...details,
+  });
+}
+
+async function matchesEnvironmentAdminPassword(password: string) {
+  const hashMatches = env.ADMIN_PASSWORD_HASH
+    ? await bcrypt.compare(password, env.ADMIN_PASSWORD_HASH)
+    : false;
+  const plainPasswordMatches = Boolean(env.ADMIN_PASSWORD) && env.ADMIN_PASSWORD === password;
+
+  return hashMatches || plainPasswordMatches;
 }
 
 export const authOptions: NextAuthOptions = {
@@ -46,43 +73,93 @@ export const authOptions: NextAuthOptions = {
 
         const { email, password } = parsed.data;
         const normalizedEmail = email.toLowerCase();
-        const user = await db.user.findUnique({
-          where: { email: normalizedEmail },
-        });
+        const isEnvironmentAdmin = normalizedEmail === env.ADMIN_EMAIL.toLowerCase();
+        const isIntendedOwner = normalizedEmail === "masonstanley@stanleysync.com";
+        let databaseLookupSucceeded = true;
+        let user: User | null = null;
+
+        try {
+          user = await db.user.findUnique({
+            where: { email: normalizedEmail },
+          });
+        } catch (error) {
+          databaseLookupSucceeded = false;
+          console.error("[auth] Database user lookup failed.", {
+            attemptedOwnerLogin: isIntendedOwner,
+            error: error instanceof Error ? error.name : "UnknownError",
+          });
+        }
 
         if (user) {
-          if (!user.isActive) {
-            return null;
+          if (user.isActive) {
+            const valid = await bcrypt.compare(password, user.passwordHash);
+            if (valid) {
+              if (isIntendedOwner) {
+                logOwnerAuthDiagnostic("database_password_valid", {
+                  databaseLookupSucceeded,
+                  databaseUserExists: true,
+                  databaseUserActive: true,
+                });
+              }
+
+              return {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                isActive: user.isActive,
+              };
+            }
           }
 
-          const valid = await bcrypt.compare(password, user.passwordHash);
-          if (!valid) {
+          // A configured owner credential is the recovery path for a stale or
+          // inactive database owner record. Other users remain database-only.
+          if (!isEnvironmentAdmin) {
+            if (isIntendedOwner) {
+              logOwnerAuthDiagnostic(user.isActive ? "database_password_invalid" : "database_user_inactive", {
+                databaseLookupSucceeded,
+                databaseUserExists: true,
+                databaseUserActive: user.isActive,
+              });
+            }
             return null;
           }
-
-          return {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            isActive: user.isActive,
-          };
         }
 
-        if (normalizedEmail !== env.ADMIN_EMAIL.toLowerCase()) {
+        if (!isEnvironmentAdmin) {
+          if (isIntendedOwner) {
+            logOwnerAuthDiagnostic("owner_email_not_configured", {
+              databaseLookupSucceeded,
+              databaseUserExists: Boolean(user),
+              databaseUserActive: user?.isActive ?? null,
+            });
+          }
           return null;
         }
 
-        if (env.ADMIN_PASSWORD_HASH) {
-          const valid = await bcrypt.compare(password, env.ADMIN_PASSWORD_HASH);
-          if (!valid) return null;
-        } else if (env.ADMIN_PASSWORD !== password) {
+        const environmentPasswordValid = await matchesEnvironmentAdminPassword(password);
+        if (!environmentPasswordValid) {
+          if (isIntendedOwner) {
+            logOwnerAuthDiagnostic("environment_password_invalid", {
+              databaseLookupSucceeded,
+              databaseUserExists: Boolean(user),
+              databaseUserActive: user?.isActive ?? null,
+            });
+          }
           return null;
+        }
+
+        if (isIntendedOwner) {
+          logOwnerAuthDiagnostic("environment_password_valid", {
+            databaseLookupSucceeded,
+            databaseUserExists: Boolean(user),
+            databaseUserActive: user?.isActive ?? null,
+          });
         }
 
         return {
           ...fallbackAdminUser(),
-          name: "StanleySync Admin",
+          name: "Mason Stanley",
           email: env.ADMIN_EMAIL,
         };
       },
@@ -158,6 +235,17 @@ export async function getCurrentAppUser() {
   });
 
   if (user) {
+    if (
+      user.email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase() &&
+      session.user.role === UserRole.SYSTEM_OWNER
+    ) {
+      return {
+        ...user,
+        role: UserRole.SYSTEM_OWNER,
+        isActive: true,
+      };
+    }
+
     return user;
   }
 
