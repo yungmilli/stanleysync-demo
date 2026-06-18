@@ -23,22 +23,16 @@ function fallbackAdminUser() {
   };
 }
 
-function logOwnerAuthDiagnostic(
-  result: string,
-  details: {
-    databaseLookupSucceeded: boolean;
-    databaseUserExists: boolean;
-    databaseUserActive: boolean | null;
-  },
-) {
-  console.info("[auth:owner-diagnostic]", {
-    result,
-    hasAdminEmail: Boolean(process.env.ADMIN_EMAIL),
-    hasAdminPassword: Boolean(process.env.ADMIN_PASSWORD),
-    hasAdminPasswordHash: Boolean(process.env.ADMIN_PASSWORD_HASH),
-    hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
-    ...details,
-  });
+function logLoginAttempt(details: {
+  attemptedEmail: string;
+  userFound: boolean;
+  envAdminFallbackUsed: boolean;
+  passwordMatch: boolean;
+  role: UserRole | null;
+}) {
+  if (process.env.NODE_ENV === "production") {
+    console.info("[auth:login]", details);
+  }
 }
 
 async function matchesEnvironmentAdminPassword(password: string) {
@@ -48,6 +42,34 @@ async function matchesEnvironmentAdminPassword(password: string) {
   const plainPasswordMatches = Boolean(env.ADMIN_PASSWORD) && env.ADMIN_PASSWORD === password;
 
   return hashMatches || plainPasswordMatches;
+}
+
+async function upsertEnvironmentOwner(password: string) {
+  const primaryWorkspace = await db.businessWorkspace.findFirst({
+    where: { isActive: true },
+    orderBy: [{ workspaceKey: "asc" }],
+    select: { id: true },
+  });
+  const passwordHash = await bcrypt.hash(password, 12);
+
+  return db.user.upsert({
+    where: { email: env.ADMIN_EMAIL.toLowerCase() },
+    update: {
+      name: "Mason Stanley",
+      passwordHash,
+      role: UserRole.SYSTEM_OWNER,
+      isActive: true,
+      activeWorkspaceId: primaryWorkspace?.id ?? undefined,
+    },
+    create: {
+      name: "Mason Stanley",
+      email: env.ADMIN_EMAIL.toLowerCase(),
+      passwordHash,
+      role: UserRole.SYSTEM_OWNER,
+      isActive: true,
+      activeWorkspaceId: primaryWorkspace?.id,
+    },
+  });
 }
 
 export const authOptions: NextAuthOptions = {
@@ -68,13 +90,20 @@ export const authOptions: NextAuthOptions = {
         const parsed = credentialsSchema.safeParse(credentials);
 
         if (!parsed.success) {
+          logLoginAttempt({
+            attemptedEmail:
+              typeof credentials?.email === "string" ? credentials.email.toLowerCase() : "invalid",
+            userFound: false,
+            envAdminFallbackUsed: false,
+            passwordMatch: false,
+            role: null,
+          });
           return null;
         }
 
         const { email, password } = parsed.data;
         const normalizedEmail = email.toLowerCase();
         const isEnvironmentAdmin = normalizedEmail === env.ADMIN_EMAIL.toLowerCase();
-        const isIntendedOwner = normalizedEmail === "masonstanley@stanleysync.com";
         let databaseLookupSucceeded = true;
         let user: User | null = null;
 
@@ -85,7 +114,7 @@ export const authOptions: NextAuthOptions = {
         } catch (error) {
           databaseLookupSucceeded = false;
           console.error("[auth] Database user lookup failed.", {
-            attemptedOwnerLogin: isIntendedOwner,
+            attemptedEmail: normalizedEmail,
             error: error instanceof Error ? error.name : "UnknownError",
           });
         }
@@ -94,13 +123,13 @@ export const authOptions: NextAuthOptions = {
           if (user.isActive) {
             const valid = await bcrypt.compare(password, user.passwordHash);
             if (valid) {
-              if (isIntendedOwner) {
-                logOwnerAuthDiagnostic("database_password_valid", {
-                  databaseLookupSucceeded,
-                  databaseUserExists: true,
-                  databaseUserActive: true,
-                });
-              }
+              logLoginAttempt({
+                attemptedEmail: normalizedEmail,
+                userFound: true,
+                envAdminFallbackUsed: false,
+                passwordMatch: true,
+                role: user.role,
+              });
 
               return {
                 id: user.id,
@@ -115,46 +144,68 @@ export const authOptions: NextAuthOptions = {
           // A configured owner credential is the recovery path for a stale or
           // inactive database owner record. Other users remain database-only.
           if (!isEnvironmentAdmin) {
-            if (isIntendedOwner) {
-              logOwnerAuthDiagnostic(user.isActive ? "database_password_invalid" : "database_user_inactive", {
-                databaseLookupSucceeded,
-                databaseUserExists: true,
-                databaseUserActive: user.isActive,
-              });
-            }
+            logLoginAttempt({
+              attemptedEmail: normalizedEmail,
+              userFound: true,
+              envAdminFallbackUsed: false,
+              passwordMatch: false,
+              role: user.role,
+            });
             return null;
           }
         }
 
         if (!isEnvironmentAdmin) {
-          if (isIntendedOwner) {
-            logOwnerAuthDiagnostic("owner_email_not_configured", {
-              databaseLookupSucceeded,
-              databaseUserExists: Boolean(user),
-              databaseUserActive: user?.isActive ?? null,
-            });
-          }
+          logLoginAttempt({
+            attemptedEmail: normalizedEmail,
+            userFound: Boolean(user),
+            envAdminFallbackUsed: false,
+            passwordMatch: false,
+            role: user?.role ?? null,
+          });
           return null;
         }
 
         const environmentPasswordValid = await matchesEnvironmentAdminPassword(password);
         if (!environmentPasswordValid) {
-          if (isIntendedOwner) {
-            logOwnerAuthDiagnostic("environment_password_invalid", {
-              databaseLookupSucceeded,
-              databaseUserExists: Boolean(user),
-              databaseUserActive: user?.isActive ?? null,
-            });
-          }
+          logLoginAttempt({
+            attemptedEmail: normalizedEmail,
+            userFound: Boolean(user),
+            envAdminFallbackUsed: true,
+            passwordMatch: false,
+            role: user?.role ?? UserRole.SYSTEM_OWNER,
+          });
           return null;
         }
 
-        if (isIntendedOwner) {
-          logOwnerAuthDiagnostic("environment_password_valid", {
-            databaseLookupSucceeded,
-            databaseUserExists: Boolean(user),
-            databaseUserActive: user?.isActive ?? null,
-          });
+        let repairedOwner: User | null = null;
+        if (databaseLookupSucceeded) {
+          try {
+            repairedOwner = await upsertEnvironmentOwner(password);
+          } catch (error) {
+            console.error("[auth] Owner database repair failed.", {
+              attemptedEmail: normalizedEmail,
+              error: error instanceof Error ? error.name : "UnknownError",
+            });
+          }
+        }
+
+        logLoginAttempt({
+          attemptedEmail: normalizedEmail,
+          userFound: Boolean(user),
+          envAdminFallbackUsed: true,
+          passwordMatch: true,
+          role: UserRole.SYSTEM_OWNER,
+        });
+
+        if (repairedOwner) {
+          return {
+            id: repairedOwner.id,
+            name: repairedOwner.name,
+            email: repairedOwner.email,
+            role: UserRole.SYSTEM_OWNER,
+            isActive: true,
+          };
         }
 
         return {
@@ -230,9 +281,22 @@ export async function getCurrentAppUser() {
     return null;
   }
 
-  const user = await db.user.findUnique({
-    where: { email: session.user.email.toLowerCase() },
-  });
+  let user: User | null = null;
+
+  try {
+    user = await db.user.findUnique({
+      where: { email: session.user.email.toLowerCase() },
+    });
+  } catch (error) {
+    if (session.user.email.toLowerCase() !== env.ADMIN_EMAIL.toLowerCase()) {
+      throw error;
+    }
+
+    console.error("[auth] Current owner database lookup failed.", {
+      attemptedEmail: session.user.email.toLowerCase(),
+      error: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
 
   if (user) {
     if (

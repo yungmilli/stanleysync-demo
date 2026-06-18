@@ -28,6 +28,10 @@ async function main() {
     );
   }
 
+  const activeWorkspaceCount = await prisma.businessWorkspace.count({
+    where: { isActive: true },
+  });
+
   const passwordHash = await bcrypt.hash(ownerPassword, 12);
   const owner = await prisma.user.upsert({
     where: { email: OWNER_EMAIL },
@@ -60,6 +64,8 @@ async function main() {
     email: owner.email,
     role: owner.role,
     workspace: primaryWorkspace.businessName,
+    workspaceAccess: "all active workspaces via SYSTEM_OWNER",
+    activeWorkspaceCount,
     isActive: owner.isActive,
   });
 }
