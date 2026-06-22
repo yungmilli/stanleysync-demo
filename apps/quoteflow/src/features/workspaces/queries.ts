@@ -81,11 +81,11 @@ async function ensureDefaultWorkspace() {
   }
 }
 
-async function safeDashboardQuery<T>(label: string, query: Promise<T>, fallback: T) {
+async function safeWorkspaceQuery<T>(label: string, query: Promise<T>, fallback: T) {
   try {
     return await query;
   } catch (error) {
-    console.error("[dashboard] Query failed; using empty fallback.", {
+    console.error("[workspace] Query failed; using safe fallback.", {
       query: label,
       error: error instanceof Error ? error.name : "UnknownError",
     });
@@ -149,20 +149,20 @@ export async function getWorkspaceDashboardData(workspaceId?: string | null) {
   dueSoon.setDate(dueSoon.getDate() + 30);
 
   const [workspaces, quotes, tickets, projects, calWorkOrders, assets, standards, certificates, widgetPreferences, customers, users, publicIntakeViews] = await Promise.all([
-    safeDashboardQuery("workspaces", db.businessWorkspace.findMany({ orderBy: { businessName: "asc" } }), []),
-    safeDashboardQuery("quotes", db.quoteRequest.findMany({ where, include: { customer: true, ticket: true, workOrderDraft: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
-    safeDashboardQuery("tickets", db.ticket.findMany({ where, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
-    safeDashboardQuery("projects", db.websiteProject.findMany({ where, include: { client: true }, orderBy: { updatedAt: "desc" }, take: 5 }), []),
-    safeDashboardQuery("calibration work orders", db.calibrationWorkOrder.findMany({ where, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
-    safeDashboardQuery("assets", db.calAsset.findMany({ where, include: { customer: true }, orderBy: { dueDate: "asc" }, take: 8 }), []),
-    safeDashboardQuery("standards", db.calibrationStandard.findMany({ where, orderBy: { dueDate: "asc" }, take: 8 }), []),
-    safeDashboardQuery("certificates", db.certificateDraft.findMany({ where, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
+    safeWorkspaceQuery("workspaces", db.businessWorkspace.findMany({ orderBy: { businessName: "asc" } }), []),
+    safeWorkspaceQuery("quotes", db.quoteRequest.findMany({ where, include: { customer: true, ticket: true, workOrderDraft: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
+    safeWorkspaceQuery("tickets", db.ticket.findMany({ where, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
+    safeWorkspaceQuery("projects", db.websiteProject.findMany({ where, include: { client: true }, orderBy: { updatedAt: "desc" }, take: 5 }), []),
+    safeWorkspaceQuery("calibration work orders", db.calibrationWorkOrder.findMany({ where, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
+    safeWorkspaceQuery("assets", db.calAsset.findMany({ where, include: { customer: true }, orderBy: { dueDate: "asc" }, take: 8 }), []),
+    safeWorkspaceQuery("standards", db.calibrationStandard.findMany({ where, orderBy: { dueDate: "asc" }, take: 8 }), []),
+    safeWorkspaceQuery("certificates", db.certificateDraft.findMany({ where, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
     workspaceId
-      ? safeDashboardQuery("widget preferences", db.dashboardWidgetPreference.findMany({ where: { workspaceId }, orderBy: [{ sortOrder: "asc" }, { title: "asc" }] }), [])
+      ? safeWorkspaceQuery("widget preferences", db.dashboardWidgetPreference.findMany({ where: { workspaceId }, orderBy: [{ sortOrder: "asc" }, { title: "asc" }] }), [])
       : Promise.resolve([]),
-    safeDashboardQuery("customers", db.customer.findMany({ where, orderBy: { createdAt: "desc" }, take: 12 }), []),
-    safeDashboardQuery("users", db.user.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }), []),
-    safeDashboardQuery("public intake views", db.auditEvent.count({ where: { ...(workspaceId ? { workspaceId } : {}), action: "PUBLIC_INTAKE_VIEW" } }), 0),
+    safeWorkspaceQuery("customers", db.customer.findMany({ where, orderBy: { createdAt: "desc" }, take: 12 }), []),
+    safeWorkspaceQuery("users", db.user.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }), []),
+    safeWorkspaceQuery("public intake views", db.auditEvent.count({ where: { ...(workspaceId ? { workspaceId } : {}), action: "PUBLIC_INTAKE_VIEW" } }), 0),
   ]);
 
   const openTickets = tickets.filter((ticket) => !["COMPLETED", "INVOICED", "CLOSED"].includes(ticket.status));
@@ -211,7 +211,7 @@ export async function getWorkspaceDashboardData(workspaceId?: string | null) {
 }
 
 export async function getWorkspaceSetupData() {
-  return db.businessWorkspace.findMany({
+  return safeWorkspaceQuery("workspace setup", db.businessWorkspace.findMany({
     orderBy: [{ isActive: "desc" }, { businessName: "asc" }],
     include: {
       customers: { select: { id: true } },
@@ -220,26 +220,28 @@ export async function getWorkspaceSetupData() {
       workOrders: { select: { id: true } },
       dashboardWidgets: { orderBy: [{ sortOrder: "asc" }, { title: "asc" }] },
     },
-  });
+  }), []);
 }
 
 export async function getSettingsData(workspaceId?: string | null) {
   const [workspace, notifications, auditEvents, workflowStages] = await Promise.all([
-    workspaceId ? db.businessWorkspace.findUnique({ where: { id: workspaceId } }) : Promise.resolve(null),
-    db.notificationEvent.findMany({
+    workspaceId
+      ? safeWorkspaceQuery("settings workspace", db.businessWorkspace.findUnique({ where: { id: workspaceId } }), null)
+      : Promise.resolve(null),
+    safeWorkspaceQuery("settings notifications", db.notificationEvent.findMany({
       where: workspaceId ? { workspaceId } : {},
       orderBy: { createdAt: "desc" },
       take: 10,
-    }),
-    db.auditEvent.findMany({
+    }), []),
+    safeWorkspaceQuery("settings audit events", db.auditEvent.findMany({
       where: workspaceId ? { workspaceId } : {},
       orderBy: { createdAt: "desc" },
       take: 10,
-    }),
-    db.workflowStage.findMany({
+    }), []),
+    safeWorkspaceQuery("settings workflow stages", db.workflowStage.findMany({
       where: workspaceId ? { workspaceId } : {},
       orderBy: [{ module: "asc" }, { sortOrder: "asc" }],
-    }).catch(() => []),
+    }), []),
   ]);
 
   return { workspace, notifications, auditEvents, workflowStages };

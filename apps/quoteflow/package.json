@@ -15,7 +15,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "seed:demo": "tsx prisma/seed-demo.ts",
-    "seed:owner": "tsx prisma/seed-owner.ts"
+    "seed:owner": "tsx prisma/seed-owner.ts",
+    "repair:production-demo": "npm run db:deploy && npm run seed:owner && npm run seed:demo"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

@@ -20,6 +20,7 @@
     "db:seed": "npm --workspace @stanleysync/quoteflow run db:seed",
     "seed:demo": "npm --workspace @stanleysync/quoteflow run seed:demo",
     "seed:owner": "npm --workspace @stanleysync/quoteflow run seed:owner",
+    "repair:production-demo": "npm --workspace @stanleysync/quoteflow run repair:production-demo",
     "verify:demo": "node scripts/verify-demo.mjs",
     "prisma:validate": "npm --workspace @stanleysync/quoteflow run prisma:validate"
   }

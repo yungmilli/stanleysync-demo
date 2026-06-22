@@ -24,6 +24,18 @@ function getSingleValue(value: SearchValue) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+async function safeOpsQuery<T>(label: string, query: Promise<T>, fallback: T) {
+  try {
+    return await query;
+  } catch (error) {
+    console.error("[ops] Query failed; using safe fallback.", {
+      query: label,
+      error: error instanceof Error ? error.name : "UnknownError",
+    });
+    return fallback;
+  }
+}
+
 export function parseListParams(searchParams: Record<string, SearchValue>) {
   return {
     query: getSingleValue(searchParams.query)?.trim() ?? "",
@@ -226,7 +238,7 @@ export async function getQuotesList(searchParams: Record<string, SearchValue>, w
         ? { requestedTurnaround: "asc" }
         : { createdAt: "desc" };
 
-  const quotes = await db.quoteRequest.findMany({
+  const quotes = await safeOpsQuery("quotes list", db.quoteRequest.findMany({
     where,
     orderBy,
     include: {
@@ -236,13 +248,13 @@ export async function getQuotesList(searchParams: Record<string, SearchValue>, w
       workOrderDraft: true,
       ticket: true,
     },
-  });
+  }), []);
 
   return { quotes, filters };
 }
 
 export async function getQuoteDetail(id: string, workspaceId?: string | null) {
-  return db.quoteRequest.findFirst({
+  return safeOpsQuery("quote detail", db.quoteRequest.findFirst({
     where: { id, ...(workspaceId ? { workspaceId } : {}) },
     include: {
       customer: true,
@@ -266,7 +278,7 @@ export async function getQuoteDetail(id: string, workspaceId?: string | null) {
         orderBy: { createdAt: "desc" },
       },
     },
-  });
+  }), null);
 }
 
 export async function getTicketsList(searchParams: Record<string, SearchValue>, workspaceId?: string | null) {
@@ -291,7 +303,7 @@ export async function getTicketsList(searchParams: Record<string, SearchValue>, 
     ],
   };
 
-  const tickets = await db.ticket.findMany({
+  const tickets = await safeOpsQuery("tickets list", db.ticket.findMany({
     where,
     orderBy:
       filters.sort === "dueDate"
@@ -308,7 +320,7 @@ export async function getTicketsList(searchParams: Record<string, SearchValue>, 
         take: 3,
       },
     },
-  });
+  }), []);
 
   const byStatus = Object.fromEntries(
     Object.values(TicketStatus).map((status) => [
@@ -321,7 +333,7 @@ export async function getTicketsList(searchParams: Record<string, SearchValue>, 
 }
 
 export async function getTicketDetail(id: string, workspaceId?: string | null) {
-  return db.ticket.findFirst({
+  return safeOpsQuery("ticket detail", db.ticket.findFirst({
     where: { id, ...(workspaceId ? { workspaceId } : {}) },
     include: {
       customer: true,
@@ -337,12 +349,12 @@ export async function getTicketDetail(id: string, workspaceId?: string | null) {
         orderBy: { createdAt: "desc" },
       },
     },
-  });
+  }), null);
 }
 
 export async function getCustomersList(searchParams: Record<string, SearchValue>, workspaceId?: string | null) {
   const query = getSingleValue(searchParams.query)?.trim() ?? "";
-  return db.customer.findMany({
+  return safeOpsQuery("customers list", db.customer.findMany({
     where: {
       ...(workspaceId ? { workspaceId } : {}),
       ...(query
@@ -366,7 +378,7 @@ export async function getCustomersList(searchParams: Record<string, SearchValue>
         take: 4,
       },
     },
-  });
+  }), []);
 }
 
 export async function getProjectsList() {
@@ -444,7 +456,7 @@ export async function getFinancialOverview() {
 }
 
 export async function getInvoicesList(workspaceId?: string | null) {
-  return db.invoice.findMany({
+  return safeOpsQuery("invoices list", db.invoice.findMany({
     where: workspaceId ? { workspaceId } : undefined,
     orderBy: { updatedAt: "desc" },
     include: {
@@ -457,11 +469,11 @@ export async function getInvoicesList(workspaceId?: string | null) {
         orderBy: { sortOrder: "asc" },
       },
     },
-  });
+  }), []);
 }
 
 export async function getInvoiceDetail(id: string, workspaceId?: string | null) {
-  return db.invoice.findFirst({
+  return safeOpsQuery("invoice detail", db.invoice.findFirst({
     where: { id, ...(workspaceId ? { workspaceId } : {}) },
     include: {
       customer: true,
@@ -476,7 +488,7 @@ export async function getInvoiceDetail(id: string, workspaceId?: string | null) 
         orderBy: { createdAt: "desc" },
       },
     },
-  });
+  }), null);
 }
 
 export async function getActivityFeed(searchParams: Record<string, SearchValue>) {
