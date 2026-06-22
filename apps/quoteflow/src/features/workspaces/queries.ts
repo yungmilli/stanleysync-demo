@@ -1,4 +1,4 @@
-import { BusinessType } from "@prisma/client";
+import { BusinessType, type BusinessWorkspace } from "@prisma/client";
 
 import { parseModules } from "@/features/workspaces/config";
 import { db } from "@/lib/db";
@@ -21,6 +21,34 @@ export const DASHBOARD_WIDGET_CATALOG = [
   { key: "ootAssets", title: "OOT assets", modules: ["CalOps"] },
   { key: "certificates", title: "Certificates", modules: ["CalOps"] },
 ] as const;
+
+function getSafeModeWorkspace(): BusinessWorkspace {
+  const now = new Date();
+
+  return {
+    id: "fallback-general-service-demo",
+    workspaceKey: "general-service-demo",
+    businessName: "StanleySync App Demo",
+    businessType: BusinessType.GENERAL_SERVICE,
+    industry: "General service business",
+    serviceCategories: ["Quotes", "Jobs", "Invoices"],
+    email: null,
+    phone: null,
+    website: null,
+    address: null,
+    logoPlaceholder: "SS",
+    logoUrl: null,
+    invoiceTerms: null,
+    quoteTerms: null,
+    setupCompletedAt: now,
+    themeAccent: "#c46a29",
+    brandColors: { primary: "#12212c", accent: "#c46a29" },
+    enabledModules: ["QuoteFlow", "WorkFlow", "Invoicing"],
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
 async function ensureDefaultWorkspace() {
   try {
@@ -49,7 +77,7 @@ async function ensureDefaultWorkspace() {
     console.error("[workspace] Default workspace repair failed.", {
       error: error instanceof Error ? error.name : "UnknownError",
     });
-    return null;
+    return getSafeModeWorkspace();
   }
 }
 
