@@ -4,6 +4,7 @@ import path from "node:path";
 
 import {
   ActivityType,
+  BusinessType,
   NotificationEventType,
   NotificationStatus,
   Priority,
@@ -128,8 +129,19 @@ export async function persistQuoteRequest({
       : validated.intakeMode === "AUTO"
         ? "auto-repair-demo"
       : "general-service-demo");
-  const workspace = await db.businessWorkspace.findUnique({
+  const workspace = await db.businessWorkspace.upsert({
     where: { workspaceKey },
+    update: { isActive: true },
+    create: {
+      workspaceKey,
+      businessName: workspaceKey === "calibration-lab-demo" ? "StanleySync Labs" : workspaceKey === "auto-repair-demo" ? "StanleySync Demo" : "StanleySync App Demo",
+      businessType: workspaceKey === "calibration-lab-demo" ? BusinessType.CALIBRATION_LAB : workspaceKey === "auto-repair-demo" ? BusinessType.AUTO_REPAIR : BusinessType.GENERAL_SERVICE,
+      industry: "Hosted pilot workspace",
+      serviceCategories: ["Quotes", "Jobs", "Invoices"],
+      brandColors: { primary: "#12212c", accent: "#c46a29" },
+      enabledModules: workspaceKey === "calibration-lab-demo" ? ["QuoteFlow", "WorkFlow", "CalOps"] : ["QuoteFlow", "WorkFlow", "Invoicing"],
+      isActive: true,
+    },
     select: { id: true },
   });
 

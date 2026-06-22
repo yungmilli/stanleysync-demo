@@ -36,6 +36,10 @@ async function safeOpsQuery<T>(label: string, query: Promise<T>, fallback: T) {
   }
 }
 
+function persistedWorkspaceId(workspaceId?: string | null) {
+  return workspaceId?.startsWith("fallback-") ? undefined : workspaceId ?? undefined;
+}
+
 export function parseListParams(searchParams: Record<string, SearchValue>) {
   return {
     query: getSingleValue(searchParams.query)?.trim() ?? "",
@@ -211,6 +215,7 @@ export async function getDashboardData() {
 
 export async function getQuotesList(searchParams: Record<string, SearchValue>, workspaceId?: string | null) {
   const filters = parseListParams(searchParams);
+  const scopedWorkspaceId = persistedWorkspaceId(workspaceId);
   const where: Prisma.QuoteRequestWhereInput = {
     AND: [
       filters.query
@@ -227,7 +232,7 @@ export async function getQuotesList(searchParams: Record<string, SearchValue>, w
       filters.serviceType ? { serviceType: filters.serviceType as ServiceType } : {},
       filters.priority ? { priority: filters.priority as Priority } : {},
       filters.dateRange ? { createdAt: getDateRangeFilter(filters.dateRange) } : {},
-      workspaceId ? { workspaceId } : {},
+      scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {},
     ],
   };
 
@@ -254,8 +259,9 @@ export async function getQuotesList(searchParams: Record<string, SearchValue>, w
 }
 
 export async function getQuoteDetail(id: string, workspaceId?: string | null) {
+  const scopedWorkspaceId = persistedWorkspaceId(workspaceId);
   return safeOpsQuery("quote detail", db.quoteRequest.findFirst({
-    where: { id, ...(workspaceId ? { workspaceId } : {}) },
+    where: { id, ...(scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {}) },
     include: {
       customer: true,
       assignedUser: true,
@@ -283,6 +289,7 @@ export async function getQuoteDetail(id: string, workspaceId?: string | null) {
 
 export async function getTicketsList(searchParams: Record<string, SearchValue>, workspaceId?: string | null) {
   const filters = parseListParams(searchParams);
+  const scopedWorkspaceId = persistedWorkspaceId(workspaceId);
   const where: Prisma.TicketWhereInput = {
     AND: [
       filters.query
@@ -299,7 +306,7 @@ export async function getTicketsList(searchParams: Record<string, SearchValue>, 
       filters.assignedTo
         ? { assignedTo: { contains: filters.assignedTo, mode: "insensitive" } }
         : {},
-      workspaceId ? { workspaceId } : {},
+      scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {},
     ],
   };
 
@@ -333,8 +340,9 @@ export async function getTicketsList(searchParams: Record<string, SearchValue>, 
 }
 
 export async function getTicketDetail(id: string, workspaceId?: string | null) {
+  const scopedWorkspaceId = persistedWorkspaceId(workspaceId);
   return safeOpsQuery("ticket detail", db.ticket.findFirst({
-    where: { id, ...(workspaceId ? { workspaceId } : {}) },
+    where: { id, ...(scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {}) },
     include: {
       customer: true,
       assignedUser: true,
@@ -354,9 +362,10 @@ export async function getTicketDetail(id: string, workspaceId?: string | null) {
 
 export async function getCustomersList(searchParams: Record<string, SearchValue>, workspaceId?: string | null) {
   const query = getSingleValue(searchParams.query)?.trim() ?? "";
+  const scopedWorkspaceId = persistedWorkspaceId(workspaceId);
   return safeOpsQuery("customers list", db.customer.findMany({
     where: {
-      ...(workspaceId ? { workspaceId } : {}),
+      ...(scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {}),
       ...(query
         ? {
             OR: [
@@ -456,8 +465,9 @@ export async function getFinancialOverview() {
 }
 
 export async function getInvoicesList(workspaceId?: string | null) {
+  const scopedWorkspaceId = persistedWorkspaceId(workspaceId);
   return safeOpsQuery("invoices list", db.invoice.findMany({
-    where: workspaceId ? { workspaceId } : undefined,
+    where: scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : undefined,
     orderBy: { updatedAt: "desc" },
     include: {
       customer: true,
@@ -473,8 +483,9 @@ export async function getInvoicesList(workspaceId?: string | null) {
 }
 
 export async function getInvoiceDetail(id: string, workspaceId?: string | null) {
+  const scopedWorkspaceId = persistedWorkspaceId(workspaceId);
   return safeOpsQuery("invoice detail", db.invoice.findFirst({
-    where: { id, ...(workspaceId ? { workspaceId } : {}) },
+    where: { id, ...(scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {}) },
     include: {
       customer: true,
       workspace: true,
