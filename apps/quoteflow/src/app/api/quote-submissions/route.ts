@@ -1,7 +1,16 @@
 import { NextResponse } from "next/server";
 
+import { quoteAnswersSchema } from "@/features/quotes/schema";
 import { persistQuoteRequest } from "@/features/quotes/submit";
 import type { ConversationMessage, QuoteAnswers } from "@/features/quotes/types";
+
+const FIELD_LABELS: Record<string, string> = {
+  serviceType: "service type",
+  contactName: "customer name",
+  company: "company or individual name",
+  email: "email address",
+  issueDescription: "work description (at least 8 characters)",
+};
 
 export async function POST(request: Request) {
   try {
@@ -16,6 +25,22 @@ export async function POST(request: Request) {
       answers: QuoteAnswers;
       transcript: ConversationMessage[];
     };
+    const validatedAnswers = quoteAnswersSchema.safeParse(parsed.answers);
+
+    if (!validatedAnswers.success) {
+      const missingFields = Array.from(new Set(validatedAnswers.error.issues.map((issue) => {
+        const field = String(issue.path[0] ?? "quote details");
+        return FIELD_LABELS[field] ?? field;
+      })));
+
+      return NextResponse.json(
+        {
+          message: `Please complete: ${missingFields.join(", ")}.`,
+          missingFields,
+        },
+        { status: 422 },
+      );
+    }
 
     const files = formData
       .getAll("files")
@@ -38,10 +63,9 @@ export async function POST(request: Request) {
     console.error("Quote submission error", error);
     return NextResponse.json(
       {
-        message:
-          "The quote request could not be submitted. Please review the required fields and try again.",
+        message: "Your answers are complete, but the quote could not be saved. Please try again shortly.",
       },
-      { status: 400 },
+      { status: 500 },
     );
   }
 }

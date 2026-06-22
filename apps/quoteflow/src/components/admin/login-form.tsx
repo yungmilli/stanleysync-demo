@@ -6,6 +6,7 @@ import { signIn } from "next-auth/react";
 export function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [staySignedIn, setStaySignedIn] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -17,6 +18,7 @@ export function LoginForm() {
     const response = await signIn("credentials", {
       email,
       password,
+      staySignedIn: String(staySignedIn),
       redirect: false,
       callbackUrl: "/admin",
     });
@@ -52,6 +54,15 @@ export function LoginForm() {
           className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white px-3 outline-none transition focus:border-[#c46a29]"
         />
       </div>
+      <label className="flex items-center gap-2 text-sm text-[#44515b]">
+        <input
+          type="checkbox"
+          checked={staySignedIn}
+          onChange={(event) => setStaySignedIn(event.target.checked)}
+          className="h-4 w-4 accent-[#c46a29]"
+        />
+        Stay signed in on this device
+      </label>
       <button
         type="submit"
         className="w-full rounded-full bg-[#12212c] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#1b3343] disabled:opacity-60"

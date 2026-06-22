@@ -1,7 +1,7 @@
 import { UserRole } from "@prisma/client";
 
 import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
-import { DetailCard, StatusBadge } from "@/components/admin/ops-ui";
+import { DetailCard, EmptyState, StatusBadge } from "@/components/admin/ops-ui";
 import { createTeamMemberAction, updateTeamMemberAction, updateTeamMemberProfileAction } from "@/features/admin/actions";
 import { requireSystemOwnerSession } from "@/features/admin/guards";
 import { db } from "@/lib/db";
@@ -21,8 +21,14 @@ const roleOptions: Array<{ value: UserRole; label: string }> = [
 export default async function UsersAndRolesPage() {
   await requireSystemOwnerSession();
   const [users, workspaces] = await Promise.all([
-    db.user.findMany({ orderBy: [{ isActive: "desc" }, { role: "asc" }, { name: "asc" }], include: { activeWorkspace: true } }),
-    db.businessWorkspace.findMany({ where: { isActive: true }, orderBy: { businessName: "asc" } }),
+    db.user.findMany({ orderBy: [{ isActive: "desc" }, { role: "asc" }, { name: "asc" }], include: { activeWorkspace: true } }).catch((error) => {
+      console.error("[settings:users] User list unavailable.", { error: error instanceof Error ? error.name : "UnknownError" });
+      return [];
+    }),
+    db.businessWorkspace.findMany({ where: { isActive: true }, orderBy: { businessName: "asc" } }).catch((error) => {
+      console.error("[settings:users] Workspace list unavailable.", { error: error instanceof Error ? error.name : "UnknownError" });
+      return [];
+    }),
   ]);
 
   return (
@@ -60,6 +66,9 @@ export default async function UsersAndRolesPage() {
         </DetailCard>
 
         <DetailCard title="Current users">
+          {users.length === 0 ? (
+            <EmptyState title="User records are unavailable" body="No users could be loaded. Existing access remains unchanged; try again after the database connection is restored." />
+          ) : (
           <div className="overflow-hidden rounded-[1rem] border border-[#12212c]/8">
             <table className="w-full border-collapse text-sm">
               <thead className="bg-white/65 text-left text-xs uppercase tracking-[0.1em] text-[#64707a]">
@@ -112,6 +121,7 @@ export default async function UsersAndRolesPage() {
               </tbody>
             </table>
           </div>
+          )}
           <p className="mt-3 text-sm text-[#64707a]">
             Reset password placeholder: set a temporary password through the add-user flow for now; a dedicated reset email can attach to the notification provider later.
           </p>

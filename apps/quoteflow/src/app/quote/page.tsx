@@ -1,8 +1,10 @@
 import Link from "next/link";
 
 import { QuoteAssistant } from "@/components/quote/quote-assistant";
+import { getAuthSession } from "@/lib/auth";
 
-export default function QuotePage() {
+export default async function QuotePage() {
+  const session = await getAuthSession();
   return (
     <main className="mx-auto max-w-[1440px] px-5 py-4 sm:px-8 lg:px-10">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
@@ -17,10 +19,10 @@ export default function QuotePage() {
           </p>
         </div>
         <Link
-          href="/"
+          href={session ? "/dashboard" : "/"}
           className="rounded-full border border-[#12212c]/10 bg-white/60 px-3.5 py-1.5 text-[0.84rem] transition hover:border-[#12212c]/20"
         >
-          Back to overview
+          {session ? "Back to dashboard" : "Back to overview"}
         </Link>
       </div>
       <QuoteAssistant />

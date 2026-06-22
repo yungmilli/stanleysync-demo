@@ -75,6 +75,11 @@ async function upsertEnvironmentOwner(password: string) {
 export const authOptions: NextAuthOptions = {
   session: {
     strategy: "jwt",
+    maxAge: env.DEMO_MODE ? 30 * 24 * 60 * 60 : 8 * 60 * 60,
+    updateAge: 24 * 60 * 60,
+  },
+  jwt: {
+    maxAge: env.DEMO_MODE ? 30 * 24 * 60 * 60 : 8 * 60 * 60,
   },
   pages: {
     signIn: "/login",

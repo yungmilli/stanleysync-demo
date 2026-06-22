@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { QuoteAssistant } from "@/components/quote/quote-assistant";
+import { getAuthSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,7 @@ export default async function PublicWorkspaceIntakePage({
   params: Promise<{ workspace: string }>;
 }) {
   const { workspace: workspaceKey } = await params;
+  const session = await getAuthSession();
   const workspace = await db.businessWorkspace.findUnique({
     where: { workspaceKey },
   });
@@ -54,10 +56,10 @@ export default async function PublicWorkspaceIntakePage({
           </p>
         </div>
         <Link
-          href="/"
+          href={session ? "/dashboard" : "/"}
           className="rounded-full border border-[#12212c]/10 bg-white/60 px-3.5 py-1.5 text-[0.84rem] transition hover:border-[#12212c]/20"
         >
-          StanleySync App
+          {session ? "Back to dashboard" : "StanleySync App"}
         </Link>
       </div>
       <QuoteAssistant

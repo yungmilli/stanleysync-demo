@@ -1,7 +1,7 @@
 "use client";
 
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, CircleCheckBig, LoaderCircle, Paperclip, SendHorizontal, Sparkles } from "lucide-react";
+import { Bot, CircleCheckBig, LoaderCircle, Paperclip, Pencil, Save, SendHorizontal, Sparkles, X } from "lucide-react";
 
 import type {
   ConversationMessage,
@@ -94,12 +94,12 @@ export function QuoteAssistant({
   const progressItems = useMemo(
     () => [
       ["Service type", answers.serviceType ? sentenceCase(answers.serviceType) : "Pending"],
-      ["Contact", answers.contactName ? `${answers.contactName} - ${answers.company}` : "Pending"],
+      ["Contact", answers.contactName ? [answers.contactName, answers.company].filter(Boolean).join(" - ") : "Pending"],
       [
         answers.intakeMode === "CALIBRATION" ? "Equipment" : "Work requested",
         answers.equipmentType ?? answers.serviceCategory ?? "Pending",
       ],
-      ["Logistics", answers.serviceMode ? sentenceCase(answers.serviceMode) : "Pending"],
+      ["Logistics", answers.locationAddress || (answers.serviceMode ? sentenceCase(answers.serviceMode) : "Pending")],
     ],
     [answers],
   );
@@ -243,6 +243,34 @@ export function QuoteAssistant({
     setCurrentQuestion(previous.question);
     setAnalysis(null);
     setInputValue(typeof previous.answer === "number" ? String(previous.answer) : String(previous.answer ?? ""));
+  }
+
+  function handleReviewSave(nextAnswers: QuoteAnswers) {
+    const changedKeys = (Object.keys(nextAnswers) as Array<keyof QuoteAnswers>).filter(
+      (key) => nextAnswers[key] !== answers[key],
+    );
+    const nextTranscript = [...cleanTranscript(transcript)];
+
+    for (const key of changedKeys) {
+      const question = answerHistory.find((item) => item.question.key === key)?.question;
+      const value = nextAnswers[key];
+      if (!question || value === undefined) continue;
+      nextTranscript.push({ role: "assistant", content: `Review update: ${question.prompt}` });
+      nextTranscript.push({ role: "user", content: String(value) });
+    }
+
+    setAnswers(nextAnswers);
+    setTranscript(cleanTranscript(nextTranscript));
+    setAnswerHistory((items) => items.map((item) => {
+      const value = nextAnswers[item.question.key];
+      return value === undefined
+        ? item
+        : { ...item, answer: value, displayValue: String(value) };
+    }));
+    setAnalysis(null);
+    startTransition(() => {
+      void loadNextQuestion(nextAnswers, nextTranscript);
+    });
   }
 
   async function handleSubmitQuote() {
@@ -405,7 +433,7 @@ export function QuoteAssistant({
                   />
                 </div>
 
-                <ReviewSection answers={answers} />
+                <ReviewSection answers={answers} onSave={handleReviewSave} />
 
                 <label className="flex cursor-pointer items-center gap-3 rounded-[0.82rem] border border-dashed border-[#12212c]/16 bg-white/60 px-3 py-2.5 text-[0.84rem] text-[#64707a]">
                   <Paperclip className="h-4 w-4" />
@@ -647,27 +675,95 @@ function QuestionControls({ canBack, onBack }: { canBack: boolean; onBack: () =>
   );
 }
 
-function ReviewSection({ answers }: { answers: QuoteAnswers }) {
+function ReviewSection({ answers, onSave }: { answers: QuoteAnswers; onSave: (answers: QuoteAnswers) => void }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState<QuoteAnswers>(answers);
+
+  function updateDraft(key: keyof QuoteAnswers, value: string) {
+    setDraft((current) => ({
+      ...current,
+      [key]: key === "unitCount" ? Number(value) : value,
+    }));
+  }
+
   const rows = [
-    ["Customer", `${answers.contactName ?? "Not captured"} - ${answers.company ?? "Not captured"}`],
-    ["Contact", `${answers.email ?? "Not captured"} ${answers.phone ? `- ${answers.phone}` : ""}`.trim()],
-    ["Service", `${answers.serviceCategory ?? answers.serviceType ?? "Not captured"}`],
-    ["Item / project", answers.equipmentType ?? answers.projectType ?? [answers.vehicleYear, answers.vehicleMake, answers.vehicleModel].filter(Boolean).join(" ") ?? "Not captured"],
-    ["Logistics", `${answers.locationAddress ?? "Location not captured"} - ${answers.requestedTurnaround ?? "Standard"}`],
-    ["Notes", answers.issueDescription ?? "Not captured"],
+    {
+      label: "Customer",
+      value: `${answers.contactName ?? "Not captured"} - ${answers.company ?? "Not captured"}`,
+      fields: [["contactName", "Customer name"], ["company", "Company or individual"]] as const,
+    },
+    {
+      label: "Contact",
+      value: `${answers.email ?? "Not captured"} ${answers.phone ? `- ${answers.phone}` : ""}`.trim(),
+      fields: [["email", "Email"], ["phone", "Phone"]] as const,
+    },
+    {
+      label: "Service",
+      value: `${answers.serviceCategory ?? answers.serviceType ?? "Not captured"}`,
+      fields: [["serviceCategory", "Service category"]] as const,
+    },
+    {
+      label: "Item / project",
+      value: answers.equipmentType || answers.projectType || [answers.vehicleYear, answers.vehicleMake, answers.vehicleModel].filter(Boolean).join(" ") || "Not captured",
+      fields: answers.intakeMode === "WEBSITE"
+        ? [["projectType", "Project type"]] as const
+        : [["equipmentType", answers.intakeMode === "AUTO" ? "Vehicle information" : "Item or project"]] as const,
+    },
+    {
+      label: "Logistics",
+      value: `${answers.locationAddress || "Location not captured"} - ${answers.requestedTurnaround ?? "Standard"}${answers.targetCompletionDate ? ` - ${answers.targetCompletionDate}` : ""}`,
+      fields: [["locationAddress", "Location"], ["requestedTurnaround", "Requested timing"], ["targetCompletionDate", "Completion date"]] as const,
+    },
+    {
+      label: "Notes",
+      value: answers.issueDescription ?? "Not captured",
+      fields: [["issueDescription", "Work description"]] as const,
+    },
   ];
 
   return (
     <div className="rounded-[0.95rem] border border-[#12212c]/10 bg-white/60 p-3.5">
-      <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-[#64707a]">Review before submitting</p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-[#64707a]">Review before submitting</p>
+        {!isEditing ? (
+          <button type="button" onClick={() => { setDraft(answers); setIsEditing(true); }} className="inline-flex items-center gap-1.5 rounded-full border border-[#12212c]/10 bg-white px-3 py-1.5 text-xs font-medium text-[#12212c]">
+            <Pencil className="h-3.5 w-3.5" /> Edit answers
+          </button>
+        ) : null}
+      </div>
       <div className="mt-3 grid gap-2 md:grid-cols-2">
-        {rows.map(([label, value]) => (
-          <div key={label} className="rounded-[0.78rem] border border-[#12212c]/8 bg-white/60 p-2.5">
-            <p className="text-[0.68rem] uppercase tracking-[0.1em] text-[#64707a]">{label}</p>
-            <p className="mt-1 text-[0.84rem] font-medium">{value}</p>
+        {rows.map((row) => (
+          <div key={row.label} className="rounded-[0.78rem] border border-[#12212c]/8 bg-white/60 p-2.5">
+            <p className="text-[0.68rem] uppercase tracking-[0.1em] text-[#64707a]">{row.label}</p>
+            {isEditing ? (
+              <div className="mt-2 space-y-2">
+                {row.fields.map(([key, label]) => (
+                  <label key={key} className="grid gap-1 text-xs text-[#64707a]">
+                    {label}
+                    {key === "issueDescription" ? (
+                      <textarea value={String(draft[key] ?? "")} onChange={(event) => updateDraft(key, event.target.value)} className="min-h-20 rounded-[0.65rem] border border-[#12212c]/12 bg-white px-2.5 py-2 text-sm text-[#12212c]" />
+                    ) : (
+                      <input type={key === "email" ? "email" : key === "targetCompletionDate" ? "date" : "text"} value={String(draft[key] ?? "")} onChange={(event) => updateDraft(key, event.target.value)} className="h-9 rounded-[0.65rem] border border-[#12212c]/12 bg-white px-2.5 text-sm text-[#12212c]" />
+                    )}
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-1 text-[0.84rem] font-medium">{row.value}</p>
+            )}
           </div>
         ))}
       </div>
+      {isEditing ? (
+        <div className="mt-3 flex gap-2">
+          <button type="button" onClick={() => { onSave(draft); setIsEditing(false); }} className="inline-flex items-center gap-1.5 rounded-full bg-[#12212c] px-3 py-1.5 text-xs font-medium text-white">
+            <Save className="h-3.5 w-3.5" /> Save answers
+          </button>
+          <button type="button" onClick={() => { setDraft(answers); setIsEditing(false); }} className="inline-flex items-center gap-1.5 rounded-full border border-[#12212c]/10 bg-white px-3 py-1.5 text-xs font-medium text-[#12212c]">
+            <X className="h-3.5 w-3.5" /> Cancel
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

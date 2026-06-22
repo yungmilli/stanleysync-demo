@@ -14,6 +14,7 @@ import {
 } from "@prisma/client";
 
 import { analyzeQuoteIntake } from "@/features/quotes/ai";
+import { getSuggestedConversionPath } from "@/features/quotes/questions";
 import { quoteAnswersSchema } from "@/features/quotes/schema";
 import type { ConversationMessage, QuoteAnswers } from "@/features/quotes/types";
 import { db } from "@/lib/db";
@@ -109,6 +110,7 @@ export async function persistQuoteRequest({
   });
   const cleanMessages = cleanTranscript(transcript);
   const analysis = await analyzeQuoteIntake(validated, cleanMessages);
+  const suggestedConversionPath = getSuggestedConversionPath(validated);
   const quoteNumber = nextRef("Q");
   const vehicleDescriptor = [
     validated.vehicleYear,
@@ -175,8 +177,17 @@ export async function persistQuoteRequest({
       documentationRequirements: validated.documentationRequirements,
       issueDescription: validated.issueDescription,
       aiSummary: analysis.summary,
-      structuredSummary: analysis.structuredData,
-      extractedFields: analysis.extractedFields,
+      structuredSummary: {
+        ...analysis.structuredData,
+        suggestedPriority: analysis.suggestedPriority,
+        suggestedConversionPath,
+      },
+      extractedFields: {
+        ...analysis.extractedFields,
+        ...validated,
+        suggestedPriority: analysis.suggestedPriority,
+        suggestedConversionPath,
+      },
       transcript: cleanMessages,
     },
   });
