@@ -17,15 +17,25 @@ async function main() {
     throw new Error("Set OWNER_PASSWORD or ADMIN_PASSWORD to the intended owner password.");
   }
 
-  const primaryWorkspace = await prisma.businessWorkspace.findUnique({
+  let primaryWorkspace = await prisma.businessWorkspace.findUnique({
     where: { workspaceKey: "general-service-demo" },
     select: { id: true, businessName: true },
   });
 
   if (!primaryWorkspace) {
-    throw new Error(
-      "StanleySync App workspace was not found. Run database migrations and the demo seed first.",
-    );
+    primaryWorkspace = await prisma.businessWorkspace.create({
+      data: {
+        workspaceKey: "general-service-demo",
+        businessName: "StanleySync App Demo",
+        businessType: "GENERAL_SERVICE",
+        industry: "General service business",
+        serviceCategories: ["Quotes", "Jobs", "Invoices"],
+        brandColors: { primary: "#12212c", accent: "#c46a29" },
+        enabledModules: ["QuoteFlow", "WorkFlow", "Invoicing"],
+        isActive: true,
+      },
+      select: { id: true, businessName: true },
+    });
   }
 
   const activeWorkspaceCount = await prisma.businessWorkspace.count({

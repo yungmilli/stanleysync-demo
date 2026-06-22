@@ -1,3 +1,5 @@
+import { BusinessType } from "@prisma/client";
+
 import { parseModules } from "@/features/workspaces/config";
 import { db } from "@/lib/db";
 
@@ -20,20 +22,89 @@ export const DASHBOARD_WIDGET_CATALOG = [
   { key: "certificates", title: "Certificates", modules: ["CalOps"] },
 ] as const;
 
-export async function getWorkspaceSwitcherData(userId: string) {
-  const [user, workspaces] = await Promise.all([
-    db.user.findUnique({
-      where: { id: userId },
-      include: { activeWorkspace: true },
-    }),
-    db.businessWorkspace.findMany({
+async function ensureDefaultWorkspace() {
+  try {
+    const existingWorkspace = await db.businessWorkspace.findFirst({
       where: { isActive: true },
       orderBy: { businessName: "asc" },
-    }),
-  ]);
+    });
 
-  const isSystemOwner = user?.role === "SYSTEM_OWNER";
-  const activeWorkspace = user?.activeWorkspace ?? workspaces[0] ?? null;
+    if (existingWorkspace) {
+      return existingWorkspace;
+    }
+
+    return await db.businessWorkspace.create({
+      data: {
+        workspaceKey: "general-service-demo",
+        businessName: "StanleySync App Demo",
+        businessType: BusinessType.GENERAL_SERVICE,
+        industry: "General service business",
+        serviceCategories: ["Quotes", "Jobs", "Invoices"],
+        brandColors: { primary: "#12212c", accent: "#c46a29" },
+        enabledModules: ["QuoteFlow", "WorkFlow", "Invoicing"],
+        isActive: true,
+      },
+    });
+  } catch (error) {
+    console.error("[workspace] Default workspace repair failed.", {
+      error: error instanceof Error ? error.name : "UnknownError",
+    });
+    return null;
+  }
+}
+
+async function safeDashboardQuery<T>(label: string, query: Promise<T>, fallback: T) {
+  try {
+    return await query;
+  } catch (error) {
+    console.error("[dashboard] Query failed; using empty fallback.", {
+      query: label,
+      error: error instanceof Error ? error.name : "UnknownError",
+    });
+    return fallback;
+  }
+}
+
+export async function getWorkspaceSwitcherData(userId: string) {
+  let workspaces = await db.businessWorkspace
+    .findMany({
+      where: { isActive: true },
+      orderBy: { businessName: "asc" },
+    })
+    .catch((error) => {
+      console.error("[workspace] Active workspace lookup failed.", {
+        error: error instanceof Error ? error.name : "UnknownError",
+      });
+      return [];
+    });
+
+  if (workspaces.length === 0) {
+    const defaultWorkspace = await ensureDefaultWorkspace();
+    workspaces = defaultWorkspace ? [defaultWorkspace] : [];
+  }
+
+  const user = userId === "env-admin"
+    ? null
+    : await db.user
+        .findUnique({
+          where: { id: userId },
+          select: {
+            role: true,
+            activeWorkspaceId: true,
+          },
+        })
+        .catch((error) => {
+          console.error("[workspace] User workspace lookup failed; selecting default workspace.", {
+            error: error instanceof Error ? error.name : "UnknownError",
+          });
+          return null;
+        });
+
+  const isSystemOwner = userId === "env-admin" || user?.role === "SYSTEM_OWNER";
+  const activeWorkspace =
+    workspaces.find((workspace) => workspace.id === user?.activeWorkspaceId) ??
+    workspaces[0] ??
+    null;
   const visibleWorkspaces = isSystemOwner ? workspaces : activeWorkspace ? [activeWorkspace] : [];
 
   return {
@@ -50,20 +121,20 @@ export async function getWorkspaceDashboardData(workspaceId?: string | null) {
   dueSoon.setDate(dueSoon.getDate() + 30);
 
   const [workspaces, quotes, tickets, projects, calWorkOrders, assets, standards, certificates, widgetPreferences, customers, users, publicIntakeViews] = await Promise.all([
-    db.businessWorkspace.findMany({ orderBy: { businessName: "asc" } }),
-    db.quoteRequest.findMany({ where, include: { customer: true, ticket: true, workOrderDraft: true }, orderBy: { updatedAt: "desc" }, take: 8 }),
-    db.ticket.findMany({ where, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }),
-    db.websiteProject.findMany({ where, include: { client: true }, orderBy: { updatedAt: "desc" }, take: 5 }),
-    db.calibrationWorkOrder.findMany({ where, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }),
-    db.calAsset.findMany({ where, include: { customer: true }, orderBy: { dueDate: "asc" }, take: 8 }),
-    db.calibrationStandard.findMany({ where, orderBy: { dueDate: "asc" }, take: 8 }),
-    db.certificateDraft.findMany({ where, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }),
+    safeDashboardQuery("workspaces", db.businessWorkspace.findMany({ orderBy: { businessName: "asc" } }), []),
+    safeDashboardQuery("quotes", db.quoteRequest.findMany({ where, include: { customer: true, ticket: true, workOrderDraft: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
+    safeDashboardQuery("tickets", db.ticket.findMany({ where, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
+    safeDashboardQuery("projects", db.websiteProject.findMany({ where, include: { client: true }, orderBy: { updatedAt: "desc" }, take: 5 }), []),
+    safeDashboardQuery("calibration work orders", db.calibrationWorkOrder.findMany({ where, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
+    safeDashboardQuery("assets", db.calAsset.findMany({ where, include: { customer: true }, orderBy: { dueDate: "asc" }, take: 8 }), []),
+    safeDashboardQuery("standards", db.calibrationStandard.findMany({ where, orderBy: { dueDate: "asc" }, take: 8 }), []),
+    safeDashboardQuery("certificates", db.certificateDraft.findMany({ where, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
     workspaceId
-      ? db.dashboardWidgetPreference.findMany({ where: { workspaceId }, orderBy: [{ sortOrder: "asc" }, { title: "asc" }] })
+      ? safeDashboardQuery("widget preferences", db.dashboardWidgetPreference.findMany({ where: { workspaceId }, orderBy: [{ sortOrder: "asc" }, { title: "asc" }] }), [])
       : Promise.resolve([]),
-    db.customer.findMany({ where, orderBy: { createdAt: "desc" }, take: 12 }),
-    db.user.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
-    db.auditEvent.count({ where: { ...(workspaceId ? { workspaceId } : {}), action: "PUBLIC_INTAKE_VIEW" } }).catch(() => 0),
+    safeDashboardQuery("customers", db.customer.findMany({ where, orderBy: { createdAt: "desc" }, take: 12 }), []),
+    safeDashboardQuery("users", db.user.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }), []),
+    safeDashboardQuery("public intake views", db.auditEvent.count({ where: { ...(workspaceId ? { workspaceId } : {}), action: "PUBLIC_INTAKE_VIEW" } }), 0),
   ]);
 
   const openTickets = tickets.filter((ticket) => !["COMPLETED", "INVOICED", "CLOSED"].includes(ticket.status));
