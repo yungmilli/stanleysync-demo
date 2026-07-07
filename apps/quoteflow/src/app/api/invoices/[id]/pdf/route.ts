@@ -1,19 +1,29 @@
-import { notFound } from "next/navigation";
-
 import { getInvoiceDetail } from "@/features/ops/queries";
+import { getCurrentAppUser } from "@/lib/auth";
 import { companyContactBlock, documentFooter, invoiceTerms } from "@/lib/company-profile";
+import { canExportForRole, canExportWorkspaceRecord, exportErrorResponse, invoicePdfExportRoles } from "@/lib/export-permissions";
 import { createProfessionalPdf, pdfResponse } from "@/lib/pdf";
 import { formatCurrency, formatDate, sentenceCase } from "@/lib/utils";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = await getCurrentAppUser();
+  if (!user?.email) return exportErrorResponse(request, "Please sign in before exporting this PDF.", 401);
+  if (!canExportForRole(user, invoicePdfExportRoles)) {
+    return exportErrorResponse(request, "Your account does not have permission to export invoice PDFs.", 403);
+  }
+
   const { id } = await params;
   const invoice = await getInvoiceDetail(id);
 
   if (!invoice) {
-    notFound();
+    return exportErrorResponse(request, "Invoice not found.", 404);
+  }
+
+  if (!canExportWorkspaceRecord(user, invoice.workspaceId)) {
+    return exportErrorResponse(request, "This invoice belongs to a different workspace.", 403);
   }
 
   const buffer = createProfessionalPdf({

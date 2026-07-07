@@ -2,28 +2,29 @@ import { UserRole } from "@prisma/client";
 
 import { getCalibrationWorkOrderDetail } from "@/features/calops/queries";
 import { getCurrentAppUser } from "@/lib/auth";
+import { exportErrorResponse } from "@/lib/export-permissions";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const user = await getCurrentAppUser();
 
   if (!user?.email) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+    return exportErrorResponse(request, "Please sign in before exporting this handoff file.", 401);
   }
 
-  if (user.role !== UserRole.ADMIN && user.role !== UserRole.MANAGER) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
+  if (user.role !== UserRole.SYSTEM_OWNER && user.role !== UserRole.ADMIN && user.role !== UserRole.MANAGER) {
+    return exportErrorResponse(request, "Your account does not have permission to export CalOps handoff files.", 403);
   }
 
   const { id } = await params;
   const workOrder = await getCalibrationWorkOrderDetail(id);
 
   if (!workOrder) {
-    return Response.json({ error: "Calibration work order not found" }, { status: 404 });
+    return exportErrorResponse(request, "Calibration work order not found.", 404);
   }
 
   const primaryAsset = workOrder.assets[0]?.asset;

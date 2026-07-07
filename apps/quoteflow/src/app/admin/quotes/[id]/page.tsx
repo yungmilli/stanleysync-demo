@@ -44,6 +44,9 @@ export default async function QuoteDetailPage({
   const extractedFields = asRecord(quote.extractedFields);
   const structuredSummary = asRecord(quote.structuredSummary);
   const conversionPath = getSuggestedConversionPath(quote.serviceType, extractedFields);
+  const isDemoUser = user.role === UserRole.DEMO_USER;
+  const canUseCalOps = user.role === UserRole.SYSTEM_OWNER || user.role === UserRole.ADMIN;
+  const conversionPathOptions = getConversionPathOptions(user.role, canUseCalOps);
   const isWebsiteRequest =
     conversionPath === "Website Builder project" ||
     Boolean(extractedFields.projectType || extractedFields.pagesNeeded || extractedFields.desiredFeatures);
@@ -64,7 +67,7 @@ export default async function QuoteDetailPage({
           <DetailCard
             title={`${quote.quoteNumber} - ${quote.customer.company}`}
             action={
-              quote.workOrderDraft ? (
+              quote.workOrderDraft && !isDemoUser ? (
                 <a
                   href={`/api/work-order-drafts/${quote.workOrderDraft.id}/export`}
                   className="text-sm text-[#9e4f18]"
@@ -194,17 +197,18 @@ export default async function QuoteDetailPage({
               }}
               assignableUsers={assignableUsers}
               conversionPath={conversionPath}
+              conversionPathOptions={conversionPathOptions}
               action={updateQuoteAction}
             />
-            <div className="hidden">
+            {false && quote ? (
             <form action={updateQuoteAction} className="space-y-3">
-              <input type="hidden" name="quoteId" value={quote.id} />
+              <input type="hidden" name="quoteId" value={quote!.id} />
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="text-sm">
                   <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Status</span>
                   <select
                     name="status"
-                    defaultValue={quote.status}
+                    defaultValue={quote!.status}
                     className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3"
                   >
                     <option value="NEW">New</option>
@@ -219,7 +223,7 @@ export default async function QuoteDetailPage({
                   <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Priority</span>
                   <select
                     name="priority"
-                    defaultValue={quote.priority}
+                    defaultValue={quote!.priority}
                     className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3"
                   >
                     <option value="LOW">Low</option>
@@ -233,7 +237,7 @@ export default async function QuoteDetailPage({
                 <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Assigned person</span>
                 <select
                   name="assignedUserId"
-                  defaultValue={quote.assignedUserId ?? ""}
+                  defaultValue={quote!.assignedUserId ?? ""}
                   className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3"
                 >
                   <option value="">Unassigned</option>
@@ -248,7 +252,7 @@ export default async function QuoteDetailPage({
                 <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Quoted amount</span>
                 <input
                   name="quotedAmount"
-                  defaultValue={quote.quotedAmount ?? ""}
+                  defaultValue={quote!.quotedAmount ?? ""}
                   className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3"
                 />
               </label>
@@ -256,7 +260,7 @@ export default async function QuoteDetailPage({
                 <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Admin notes summary</span>
                 <textarea
                   name="adminNotes"
-                  defaultValue={quote.adminNotes ?? ""}
+                  defaultValue={quote!.adminNotes ?? ""}
                   className="min-h-28 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 py-3"
                 />
               </label>
@@ -264,7 +268,7 @@ export default async function QuoteDetailPage({
                 Save review
               </button>
             </form>
-            </div>
+            ) : null}
 
             {!quote.workOrderDraft ? (
               <div className="mt-3 flex flex-wrap gap-2">
@@ -280,7 +284,7 @@ export default async function QuoteDetailPage({
                     Convert to General Job
                   </button>
                 </form>
-                {user.role === UserRole.ADMIN && quote.serviceType === "CALIBRATION" ? (
+                {canUseCalOps && quote.serviceType === "CALIBRATION" ? (
                   <form action={convertQuoteToCalibrationWorkOrderAction}>
                     <input type="hidden" name="quoteId" value={quote.id} />
                     <button type="submit" className="rounded-full bg-[#c46a29] px-4 py-2 text-sm font-medium text-white">
@@ -288,7 +292,7 @@ export default async function QuoteDetailPage({
                     </button>
                   </form>
                 ) : null}
-                {isWebsiteRequest ? (
+                {!isDemoUser && isWebsiteRequest ? (
                   <form action={convertQuoteToWebsiteProjectAction}>
                     <input type="hidden" name="quoteId" value={quote.id} />
                     <button type="submit" className="rounded-full bg-[#2f6f67] px-4 py-2 text-sm font-medium text-white">
@@ -296,12 +300,14 @@ export default async function QuoteDetailPage({
                     </button>
                   </form>
                 ) : null}
-                <form action={convertQuoteToWorkOrderDraftAction}>
-                  <input type="hidden" name="quoteId" value={quote.id} />
-                  <button type="submit" className="rounded-full border border-[#12212c]/10 px-4 py-2 text-sm font-medium">
-                    Export Draft Handoff
-                  </button>
-                </form>
+                {!isDemoUser ? (
+                  <form action={convertQuoteToWorkOrderDraftAction}>
+                    <input type="hidden" name="quoteId" value={quote.id} />
+                    <button type="submit" className="rounded-full border border-[#12212c]/10 px-4 py-2 text-sm font-medium">
+                      Export Draft Handoff
+                    </button>
+                  </form>
+                ) : null}
                 {quote.quotedAmount ? (
                   <form action={createInvoiceFromQuoteAction}>
                     <input type="hidden" name="quoteId" value={quote.id} />
@@ -310,7 +316,7 @@ export default async function QuoteDetailPage({
                     </button>
                   </form>
                 ) : null}
-                {user.role === UserRole.ADMIN && quote.serviceType === "CALIBRATION" ? (
+                {canUseCalOps && quote.serviceType === "CALIBRATION" ? (
                   <Link
                     href="/admin/integrations/calops"
                     className="rounded-full border border-[#12212c]/10 px-4 py-2 text-sm font-medium"
@@ -319,7 +325,7 @@ export default async function QuoteDetailPage({
                   </Link>
                 ) : null}
               </div>
-            ) : (
+            ) : !isDemoUser ? (
               <div className="mt-3 rounded-[0.9rem] border border-[#12212c]/8 bg-white/55 p-3 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
@@ -351,7 +357,7 @@ export default async function QuoteDetailPage({
                   </Link>
                 </div>
               </div>
-            )}
+            ) : null}
           </DetailCard>
 
           <DetailCard title="Internal notes">
@@ -401,7 +407,7 @@ export default async function QuoteDetailPage({
             </form>
           </DetailCard>
 
-          {quote.workOrderDraft ? (
+          {quote.workOrderDraft && !isDemoUser ? (
             <DetailCard title="Work order draft handoff">
               <KeyValueGrid
                 items={[
@@ -474,4 +480,17 @@ function getSuggestedConversionPath(serviceType: string, fields: Record<string, 
   }
 
   return "General WorkFlow job";
+}
+
+function getConversionPathOptions(role: UserRole, canUseCalOps: boolean) {
+  if (role === UserRole.DEMO_USER) {
+    return ["General WorkFlow job", "Quote review only"];
+  }
+
+  return [
+    "General WorkFlow job",
+    ...(canUseCalOps ? ["CalOps calibration work order"] : []),
+    "Website Builder project",
+    "Quote review only",
+  ];
 }

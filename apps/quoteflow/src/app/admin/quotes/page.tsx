@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { UserRole } from "@prisma/client";
 
 import {
   AdminSection,
@@ -23,6 +24,7 @@ export default async function AdminQuotesPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { user } = await requireQuoteAccess();
+  const canSeeHandoffExports = user.role !== UserRole.DEMO_USER;
   const workspaceState = await getWorkspaceSwitcherData(user.id);
   const resolvedSearchParams = await searchParams;
   const { quotes, filters } = await getQuotesList(resolvedSearchParams, workspaceState.activeWorkspace?.id);
@@ -95,7 +97,7 @@ export default async function AdminQuotesPage({
                 <th>Turnaround</th>
                 <th>Assigned</th>
                 <th>Created</th>
-                <th>Handoff</th>
+                {canSeeHandoffExports ? <th>Handoff</th> : null}
                 <th />
               </tr>
             </thead>
@@ -128,13 +130,15 @@ export default async function AdminQuotesPage({
                   <td>{quote.requestedTurnaround ?? "Not set"}</td>
                   <td>{quote.assignedTo ?? "Unassigned"}</td>
                   <td>{formatDate(quote.createdAt)}</td>
-                  <td>
-                    {quote.workOrderDraft ? (
-                      <StatusBadge label={quote.workOrderDraft.draftNumber} tone="info" />
-                    ) : (
-                      <span className="text-xs text-[#64707a]">Not converted</span>
-                    )}
-                  </td>
+                  {canSeeHandoffExports ? (
+                    <td>
+                      {quote.workOrderDraft ? (
+                        <StatusBadge label={quote.workOrderDraft.draftNumber} tone="info" />
+                      ) : (
+                        <span className="text-xs text-[#64707a]">Not converted</span>
+                      )}
+                    </td>
+                  ) : null}
                   <td>
                     <div className="flex justify-end gap-2">
                       <Link
@@ -143,7 +147,7 @@ export default async function AdminQuotesPage({
                       >
                         Open
                       </Link>
-                      {quote.workOrderDraft ? (
+                      {quote.workOrderDraft && canSeeHandoffExports ? (
                         <a
                           href={`/api/work-order-drafts/${quote.workOrderDraft.id}/export`}
                           className="rounded-full border border-[#12212c]/10 px-3 py-1.5 text-xs font-medium"

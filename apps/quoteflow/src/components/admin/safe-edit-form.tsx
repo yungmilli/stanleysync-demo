@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useFormStatus } from "react-dom";
 
 export function SafeEditForm({
   action,
@@ -40,16 +41,32 @@ export function SafeEditForm({
         <div className="rounded-[0.8rem] border border-[#c46a29]/20 bg-[#fff4e6] px-3 py-2 text-sm text-[#9e4f18]">
           Unsaved changes
         </div>
-      ) : null}
+      ) : (
+        <div className="rounded-[0.8rem] border border-[#25624f]/15 bg-[#e9f5ef] px-3 py-2 text-sm text-[#25624f]">
+          Saved ✓
+        </div>
+      )}
       {children}
       <div className="flex flex-wrap gap-2">
-        <button type="submit" className="rounded-full bg-[#12212c] px-4 py-2 text-sm font-medium text-white">
-          {saveLabel}
-        </button>
+        <SafeEditSubmitButton label={saveLabel} />
         <button type="reset" className="rounded-full border border-[#12212c]/10 bg-white/70 px-4 py-2 text-sm font-medium text-[#12212c]">
           {cancelLabel}
         </button>
       </div>
     </form>
+  );
+}
+
+function SafeEditSubmitButton({ label }: { label: string }) {
+  const { pending } = useFormStatus();
+
+  return (
+    <button
+      type="submit"
+      className="rounded-full bg-[#12212c] px-4 py-2 text-sm font-medium text-white disabled:bg-[#8b959c] disabled:text-white"
+      disabled={pending}
+    >
+      {pending ? "Saving..." : label}
+    </button>
   );
 }

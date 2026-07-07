@@ -57,6 +57,11 @@ function optionalDate(value: FormDataEntryValue | null) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function enumValue<T extends Record<string, string>>(source: T, value: FormDataEntryValue | null, fallback: T[keyof T]) {
+  if (typeof value !== "string") return fallback;
+  return Object.values(source).includes(value) ? (value as T[keyof T]) : fallback;
+}
+
 function nextReference(prefix: string) {
   return `${prefix}-${Date.now().toString().slice(-6)}`;
 }
@@ -139,16 +144,17 @@ async function getAssignedUserDetails(userId: string | null) {
 }
 
 export async function updateQuoteAction(formData: FormData) {
-  const { session } = await requireQuoteAccess();
+  const { session, user } = await requireQuoteAccess();
   const quoteId = String(formData.get("quoteId"));
-  const status = String(formData.get("status")) as QuoteStatus;
-  const priority = String(formData.get("priority")) as Priority;
-  const serviceType = String(formData.get("serviceType")) as ServiceType;
   const assignedUserId = optionalString(formData.get("assignedUserId"));
   const adminNotes = optionalString(formData.get("adminNotes"));
   const customerVisibleNotes = optionalString(formData.get("customerVisibleNotes"));
   const requestedTurnaround = optionalString(formData.get("requestedTurnaround"));
-  const conversionPath = optionalString(formData.get("conversionPath"));
+  const rawConversionPath = optionalString(formData.get("conversionPath"));
+  const conversionPath =
+    user.role === UserRole.DEMO_USER && rawConversionPath === "CalOps calibration work order"
+      ? "Quote review only"
+      : rawConversionPath;
   const quotedAmount = optionalNumber(formData.get("quotedAmount"));
   const assignee = await getAssignedUserDetails(assignedUserId);
 
@@ -160,6 +166,9 @@ export async function updateQuoteAction(formData: FormData) {
     return;
   }
 
+  const status = enumValue(QuoteStatus, formData.get("status"), existing.status);
+  const priority = enumValue(Priority, formData.get("priority"), existing.priority);
+  const serviceType = enumValue(ServiceType, formData.get("serviceType"), existing.serviceType);
   const existingFields =
     existing.extractedFields && typeof existing.extractedFields === "object" && !Array.isArray(existing.extractedFields)
       ? existing.extractedFields as Record<string, unknown>
@@ -170,7 +179,7 @@ export async function updateQuoteAction(formData: FormData) {
     data: {
       status,
       priority,
-      serviceType: Object.values(ServiceType).includes(serviceType) ? serviceType : ServiceType.OTHER,
+      serviceType,
       assignedUserId: assignee.assignedUserId,
       assignedTo: assignee.assignedTo,
       adminNotes,
@@ -1173,9 +1182,6 @@ export async function sendQuoteEmailAction(formData: FormData) {
 export async function updateTicketAction(formData: FormData) {
   const { session } = await requireTicketAccess();
   const ticketId = String(formData.get("ticketId"));
-  const status = String(formData.get("status")) as TicketStatus;
-  const priority = String(formData.get("priority")) as Priority;
-  const type = String(formData.get("type")) as TicketType;
   const assignedUserId = optionalString(formData.get("assignedUserId"));
   const dueDate = optionalDate(formData.get("dueDate"));
   const estimatedHours = optionalNumber(formData.get("estimatedHours"));
@@ -1196,6 +1202,9 @@ export async function updateTicketAction(formData: FormData) {
 
   if (!existing) return;
 
+  const status = enumValue(TicketStatus, formData.get("status"), existing.status);
+  const priority = enumValue(Priority, formData.get("priority"), existing.priority);
+  const type = enumValue(TicketType, formData.get("type"), existing.type);
   const financials = calculateTicketFinancials({
     actualHours,
     laborRate,
@@ -1392,6 +1401,129 @@ export async function updateTeamMemberProfileAction(formData: FormData) {
   revalidatePath("/admin/settings/users");
   revalidatePath("/admin/team");
   revalidatePath("/admin");
+}
+
+const demoCleanupWorkspaceKeys = ["general-service-demo", "auto-repair-demo"];
+
+function parseCleanupRecords(values: FormDataEntryValue[]) {
+  return values.reduce(
+    (accumulator, value) => {
+      if (typeof value !== "string") return accumulator;
+      const [type, id] = value.split(":");
+      if (!id) return accumulator;
+      if (type === "quote") accumulator.quoteIds.push(id);
+      if (type === "ticket") accumulator.ticketIds.push(id);
+      if (type === "invoice") accumulator.invoiceIds.push(id);
+      return accumulator;
+    },
+    { quoteIds: [] as string[], ticketIds: [] as string[], invoiceIds: [] as string[] },
+  );
+}
+
+async function getDemoCleanupWorkspaceIds() {
+  const workspaces = await db.businessWorkspace.findMany({
+    where: { workspaceKey: { in: demoCleanupWorkspaceKeys } },
+    select: { id: true },
+  });
+
+  return workspaces.map((workspace) => workspace.id);
+}
+
+async function writeCleanupAudit(actor: string, summary: string, payload: Prisma.InputJsonValue) {
+  await db.auditEvent.create({
+    data: {
+      action: "DEMO_DATA_CLEANUP",
+      entityType: "DemoData",
+      summary,
+      actorEmail: actor,
+      payload,
+    },
+  });
+}
+
+export async function deleteSelectedDemoRecordsAction(formData: FormData) {
+  const { session } = await requireSystemOwnerSession();
+  const confirmText = optionalString(formData.get("confirmText"));
+  if (confirmText !== "DELETE") return;
+
+  const workspaceIds = await getDemoCleanupWorkspaceIds();
+  if (workspaceIds.length === 0) return;
+
+  const { quoteIds, ticketIds, invoiceIds } = parseCleanupRecords(formData.getAll("selectedRecord"));
+
+  const [deletedInvoices, deletedTickets, deletedQuotes] = await Promise.all([
+    invoiceIds.length
+      ? db.invoice.deleteMany({
+          where: {
+            id: { in: invoiceIds },
+            workspaceId: { in: workspaceIds },
+          },
+        })
+      : Promise.resolve({ count: 0 }),
+    ticketIds.length
+      ? db.ticket.deleteMany({
+          where: {
+            id: { in: ticketIds },
+            workspaceId: { in: workspaceIds },
+          },
+        })
+      : Promise.resolve({ count: 0 }),
+    quoteIds.length
+      ? db.quoteRequest.deleteMany({
+          where: {
+            id: { in: quoteIds },
+            workspaceId: { in: workspaceIds },
+          },
+        })
+      : Promise.resolve({ count: 0 }),
+  ]);
+
+  await writeCleanupAudit(
+    session.user.email ?? "system-owner",
+    "Selected demo workflow records deleted.",
+    {
+      invoices: deletedInvoices.count,
+      tickets: deletedTickets.count,
+      quotes: deletedQuotes.count,
+    },
+  );
+
+  revalidatePath("/admin/cleanup");
+  revalidatePath("/admin");
+  revalidatePath("/admin/quotes");
+  revalidatePath("/admin/tickets");
+  revalidatePath("/admin/invoices");
+}
+
+export async function clearDemoWorkflowRecordsAction(formData: FormData) {
+  const { session } = await requireSystemOwnerSession();
+  const confirmText = optionalString(formData.get("confirmText"));
+  if (confirmText !== "DELETE") return;
+
+  const workspaceIds = await getDemoCleanupWorkspaceIds();
+  if (workspaceIds.length === 0) return;
+
+  const [deletedInvoices, deletedTickets, deletedQuotes] = await Promise.all([
+    db.invoice.deleteMany({ where: { workspaceId: { in: workspaceIds } } }),
+    db.ticket.deleteMany({ where: { workspaceId: { in: workspaceIds } } }),
+    db.quoteRequest.deleteMany({ where: { workspaceId: { in: workspaceIds } } }),
+  ]);
+
+  await writeCleanupAudit(
+    session.user.email ?? "system-owner",
+    "All demo workflow records deleted.",
+    {
+      invoices: deletedInvoices.count,
+      tickets: deletedTickets.count,
+      quotes: deletedQuotes.count,
+    },
+  );
+
+  revalidatePath("/admin/cleanup");
+  revalidatePath("/admin");
+  revalidatePath("/admin/quotes");
+  revalidatePath("/admin/tickets");
+  revalidatePath("/admin/invoices");
 }
 
 export async function createIdeaPostAction(formData: FormData) {

@@ -170,11 +170,11 @@ export default async function TicketDetailPage({
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field name="estimatedHours" label="Estimated hours" defaultValue={ticket.estimatedHours ?? ""} />
                 <Field name="actualHours" label="Actual hours" defaultValue={ticket.actualHours ?? ""} />
-                <Field name="laborRate" label="Labor rate" defaultValue={ticket.laborRate ?? ""} />
-                <Field name="materialsCost" label="Materials cost" defaultValue={ticket.materialsCost ?? ""} />
-                <Field name="shippingCost" label="Shipping cost" defaultValue={ticket.shippingCost ?? ""} />
-                <Field name="quotedAmount" label="Quoted amount" defaultValue={ticket.quotedAmount ?? ""} />
-                <Field name="billedAmount" label="Billed amount" defaultValue={ticket.billedAmount ?? ""} />
+                <Field name="laborRate" label="Labor rate" defaultValue={ticket.laborRate ?? ""} prefix="$" />
+                <Field name="materialsCost" label="Materials cost" defaultValue={ticket.materialsCost ?? ""} prefix="$" />
+                <Field name="shippingCost" label="Shipping cost" defaultValue={ticket.shippingCost ?? ""} prefix="$" />
+                <Field name="quotedAmount" label="Quoted amount" defaultValue={ticket.quotedAmount ?? ""} prefix="$" />
+                <Field name="billedAmount" label="Billed amount" defaultValue={ticket.billedAmount ?? ""} prefix="$" />
               </div>
               <label className="block text-sm">
                 <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Notes</span>
@@ -220,15 +220,28 @@ function Field({
   label,
   name,
   defaultValue,
+  prefix,
 }: {
   label: string;
   name: string;
   defaultValue: string | number;
+  prefix?: string;
 }) {
   return (
     <label className="text-sm">
       <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">{label}</span>
-      <input name={name} defaultValue={defaultValue} className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3" />
+      <span className="relative block">
+        {prefix ? (
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-[#64707a]">
+            {prefix}
+          </span>
+        ) : null}
+        <input
+          name={name}
+          defaultValue={defaultValue}
+          className={`h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 ${prefix ? "pl-7" : ""}`}
+        />
+      </span>
     </label>
   );
 }

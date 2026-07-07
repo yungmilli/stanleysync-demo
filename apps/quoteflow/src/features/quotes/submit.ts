@@ -37,6 +37,14 @@ function cleanTranscript(messages: ConversationMessage[]) {
   });
 }
 
+function logNonCriticalQuoteError(label: string, error: unknown, quoteNumber?: string) {
+  console.error("[quotes] Non-critical quote submission step failed.", {
+    step: label,
+    quoteNumber,
+    error: error instanceof Error ? error.message : "Unknown error",
+  });
+}
+
 function toServiceType(value: QuoteAnswers["serviceType"]) {
   switch (value) {
     case "CALIBRATION":
@@ -206,26 +214,31 @@ export async function persistQuoteRequest({
 
   if (files.length > 0) {
     const uploadDir = path.join(process.cwd(), "public", "uploads", "quote-attachments", quote.id);
-    await mkdir(uploadDir, { recursive: true });
 
-    for (const file of files) {
-      if (!file.size) continue;
+    try {
+      await mkdir(uploadDir, { recursive: true });
 
-      const ext = path.extname(file.name);
-      const fileName = `${randomUUID()}${ext}`;
-      const filePath = path.join(uploadDir, fileName);
-      const arrayBuffer = await file.arrayBuffer();
-      await writeFile(filePath, Buffer.from(arrayBuffer));
+      for (const file of files) {
+        if (!file.size) continue;
 
-      await db.quoteAttachment.create({
-        data: {
-          quoteRequestId: quote.id,
-          fileName: file.name,
-          filePath: `/uploads/quote-attachments/${quote.id}/${fileName}`,
-          mimeType: file.type,
-          sizeBytes: file.size,
-        },
-      });
+        const ext = path.extname(file.name);
+        const fileName = `${randomUUID()}${ext}`;
+        const filePath = path.join(uploadDir, fileName);
+        const arrayBuffer = await file.arrayBuffer();
+        await writeFile(filePath, Buffer.from(arrayBuffer));
+
+        await db.quoteAttachment.create({
+          data: {
+            quoteRequestId: quote.id,
+            fileName: file.name,
+            filePath: `/uploads/quote-attachments/${quote.id}/${fileName}`,
+            mimeType: file.type,
+            sizeBytes: file.size,
+          },
+        });
+      }
+    } catch (error) {
+      logNonCriticalQuoteError("attachments", error, quoteNumber);
     }
   }
 
@@ -287,7 +300,7 @@ export async function persistQuoteRequest({
     ],
   }).catch(() => undefined);
 
-  await Promise.all([
+  const emailResults = await Promise.allSettled([
     sendAdminNewQuoteEmail({
       quoteNumber,
       customerName: validated.contactName,
@@ -303,17 +316,22 @@ export async function persistQuoteRequest({
     }),
   ]);
 
-  await db.activityLog.create({
-    data: {
-      type: ActivityType.EMAIL_SENT,
-      entityType: "QuoteRequest",
-      entityId: quote.id,
-      title: "Notification email sent",
-      description: `Admin and customer notifications were triggered for ${quoteNumber}.`,
-      customerId: customer.id,
-      quoteId: quote.id,
-    },
-  });
+  const failedEmail = emailResults.find((result) => result.status === "rejected");
+  if (failedEmail?.status === "rejected") {
+    logNonCriticalQuoteError("email notifications", failedEmail.reason, quoteNumber);
+  } else {
+    await db.activityLog.create({
+      data: {
+        type: ActivityType.EMAIL_SENT,
+        entityType: "QuoteRequest",
+        entityId: quote.id,
+        title: "Notification email sent",
+        description: `Admin and customer notifications were triggered for ${quoteNumber}.`,
+        customerId: customer.id,
+        quoteId: quote.id,
+      },
+    });
+  }
 
   return {
     quoteId: quote.id,

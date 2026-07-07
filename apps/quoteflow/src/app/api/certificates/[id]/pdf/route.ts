@@ -3,6 +3,7 @@ import { UserRole } from "@prisma/client";
 import { getCurrentAppUser } from "@/lib/auth";
 import { companyContactBlock, documentFooter } from "@/lib/company-profile";
 import { db } from "@/lib/db";
+import { exportErrorResponse } from "@/lib/export-permissions";
 import { createProfessionalPdf, pdfResponse } from "@/lib/pdf";
 import { formatDate, sentenceCase } from "@/lib/utils";
 
@@ -10,11 +11,11 @@ export const dynamic = "force-dynamic";
 
 const exportRoles: UserRole[] = [UserRole.SYSTEM_OWNER, UserRole.ADMIN, UserRole.MANAGER];
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentAppUser();
-  if (!user?.email) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!user?.email) return exportErrorResponse(request, "Please sign in before exporting this PDF.", 401);
   if (!exportRoles.includes(user.role)) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
+    return exportErrorResponse(request, "Your account does not have permission to export certificate PDFs.", 403);
   }
 
   const { id } = await params;
@@ -32,7 +33,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       },
     },
   });
-  if (!certificate) return Response.json({ error: "Certificate not found" }, { status: 404 });
+  if (!certificate) return exportErrorResponse(request, "Certificate not found.", 404);
 
   const buffer = createProfessionalPdf({
     title: "Calibration Certificate",

@@ -39,6 +39,7 @@ export default async function SettingsPage() {
           ["Payments", "Invoice payment links"],
           ["Branding", "Logo and colors"],
           ["Demo Mode", env.DEMO_MODE ? "Enabled" : "Disabled"],
+          ["Owner Cleanup", user.role === UserRole.SYSTEM_OWNER ? "Clear demo quotes, jobs, and invoices" : "System Owner only"],
         ].map(([title, body]) => (
           <div key={title} className="rounded-[1rem] border border-[#12212c]/8 bg-white/55 p-4">
             <p className="text-sm font-semibold">{title}</p>
@@ -46,6 +47,11 @@ export default async function SettingsPage() {
             {title === "Users & Roles" && user.role === UserRole.SYSTEM_OWNER ? (
               <Link href="/admin/settings/users" className="mt-3 inline-flex rounded-full border border-[#12212c]/10 px-3 py-1.5 text-xs font-medium">
                 Open users
+              </Link>
+            ) : null}
+            {title === "Owner Cleanup" && user.role === UserRole.SYSTEM_OWNER ? (
+              <Link href="/admin/cleanup" className="mt-3 inline-flex rounded-full border border-[#12212c]/10 px-3 py-1.5 text-xs font-medium">
+                Open cleanup
               </Link>
             ) : null}
           </div>

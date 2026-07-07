@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useFormStatus } from "react-dom";
 import type { Priority, QuoteStatus, ServiceType, UserRole } from "@prisma/client";
 
 import { sentenceCase } from "@/lib/utils";
@@ -25,6 +26,7 @@ type QuoteReviewEditorProps = {
   };
   assignableUsers: AssignableUser[];
   conversionPath: string;
+  conversionPathOptions: string[];
   action: (formData: FormData) => void;
 };
 
@@ -42,13 +44,6 @@ const quoteStatuses = [
 
 const priorities = ["LOW", "NORMAL", "HIGH", "URGENT"] as const;
 const serviceTypes = ["CALIBRATION", "REPAIR", "CUSTOM_SERVICE", "OTHER"] as const;
-const conversionPaths = [
-  "General WorkFlow job",
-  "CalOps calibration work order",
-  "Website Builder project",
-  "Quote review only",
-];
-
 type ReviewFieldName =
   | "status"
   | "priority"
@@ -64,8 +59,12 @@ export function QuoteReviewEditor({
   quote,
   assignableUsers,
   conversionPath,
+  conversionPathOptions,
   action,
 }: QuoteReviewEditorProps) {
+  const initialConversionPath = conversionPathOptions.includes(conversionPath)
+    ? conversionPath
+    : conversionPathOptions[0] ?? "Quote review only";
   const initial = useMemo(
     () => ({
       status: quote.status,
@@ -76,9 +75,9 @@ export function QuoteReviewEditor({
       quotedAmount: quote.quotedAmount?.toString() ?? "",
       adminNotes: quote.adminNotes ?? "",
       customerVisibleNotes: quote.issueDescription ?? "",
-      conversionPath,
+      conversionPath: initialConversionPath,
     }),
-    [quote, conversionPath],
+    [quote, initialConversionPath],
   );
   const [isEditing, setIsEditing] = useState(false);
   const [values, setValues] = useState(initial);
@@ -105,7 +104,13 @@ export function QuoteReviewEditor({
   }
 
   return (
-    <form action={action} className="space-y-3">
+    <form
+      action={action}
+      className="space-y-3"
+      onSubmit={() => {
+        setIsEditing(false);
+      }}
+    >
       <input type="hidden" name="quoteId" value={quote.id} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
@@ -132,13 +137,7 @@ export function QuoteReviewEditor({
               >
                 Cancel changes
               </button>
-              <button
-                type="submit"
-                className="rounded-full bg-[#12212c] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                disabled={!isDirty}
-              >
-                Save changes
-              </button>
+              <QuoteReviewSubmitButton disabled={!isDirty} />
             </>
           )}
         </div>
@@ -147,12 +146,16 @@ export function QuoteReviewEditor({
         <div className="rounded-[0.8rem] border border-[#c46a29]/25 bg-[#fff4e6] px-3 py-2 text-xs font-medium text-[#9e4f18]">
           Unsaved changes
         </div>
-      ) : null}
+      ) : (
+        <div className="rounded-[0.8rem] border border-[#25624f]/15 bg-[#e9f5ef] px-3 py-2 text-xs font-medium text-[#25624f]">
+          Saved ✓
+        </div>
+      )}
       <div className="grid gap-3 sm:grid-cols-2">
         <SelectField label="Status" name="status" value={values.status} disabled={!isEditing} onChange={update} options={quoteStatuses} />
         <SelectField label="Priority" name="priority" value={values.priority} disabled={!isEditing} onChange={update} options={priorities} />
         <SelectField label="Service type" name="serviceType" value={values.serviceType} disabled={!isEditing} onChange={update} options={serviceTypes} />
-        <SelectField label="Conversion path" name="conversionPath" value={values.conversionPath} disabled={!isEditing} onChange={update} options={conversionPaths} />
+        <SelectField label="Conversion path" name="conversionPath" value={values.conversionPath} disabled={!isEditing} onChange={update} options={conversionPathOptions} />
       </div>
       <label className="block text-sm">
         <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Assigned person</span>
@@ -173,11 +176,25 @@ export function QuoteReviewEditor({
       </label>
       <div className="grid gap-3 sm:grid-cols-2">
         <InputField label="Turnaround" name="requestedTurnaround" value={values.requestedTurnaround} disabled={!isEditing} onChange={update} />
-        <InputField label="Quoted amount" name="quotedAmount" value={values.quotedAmount} disabled={!isEditing} onChange={update} />
+        <InputField label="Quoted amount" name="quotedAmount" value={values.quotedAmount} disabled={!isEditing} onChange={update} prefix="$" />
       </div>
       <TextAreaField label="Customer visible notes" name="customerVisibleNotes" value={values.customerVisibleNotes} disabled={!isEditing} onChange={update} />
       <TextAreaField label="Internal admin notes" name="adminNotes" value={values.adminNotes} disabled={!isEditing} onChange={update} />
     </form>
+  );
+}
+
+function QuoteReviewSubmitButton({ disabled }: { disabled: boolean }) {
+  const { pending } = useFormStatus();
+
+  return (
+    <button
+      type="submit"
+      className="rounded-full bg-[#12212c] px-4 py-2 text-sm font-medium text-white disabled:bg-[#8b959c] disabled:text-white"
+      disabled={disabled || pending}
+    >
+      {pending ? "Saving..." : "Save changes"}
+    </button>
   );
 }
 
@@ -222,23 +239,32 @@ function InputField({
   value,
   disabled,
   onChange,
+  prefix,
 }: {
   label: string;
   name: ReviewFieldName;
   value: string;
   disabled: boolean;
   onChange: (name: ReviewFieldName, value: string) => void;
+  prefix?: string;
 }) {
   return (
     <label className="block text-sm">
       <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">{label}</span>
-      <input
-        name={name}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(name, event.target.value)}
-        className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 disabled:opacity-70"
-      />
+      <span className="relative block">
+        {prefix ? (
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-[#64707a]">
+            {prefix}
+          </span>
+        ) : null}
+        <input
+          name={name}
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(name, event.target.value)}
+          className={`h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 disabled:opacity-70 ${prefix ? "pl-7" : ""}`}
+        />
+      </span>
     </label>
   );
 }
