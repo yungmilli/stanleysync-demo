@@ -2,6 +2,7 @@
 
 import {
   ActivityType,
+  BusinessType,
   CalibrationWorkOrderStatus,
   IdeaStatus,
   InvoiceStatus,
@@ -26,6 +27,7 @@ import {
   requireIdeaBoardAccess,
   requireManagerSession,
   requireQuoteAccess,
+  requireTicketAccess,
   requireSystemOwnerSession,
 } from "@/features/admin/guards";
 import { buildWorkOrderDraftCreateData } from "@/features/work-orders/payload";
@@ -57,6 +59,58 @@ function optionalDate(value: FormDataEntryValue | null) {
 
 function nextReference(prefix: string) {
   return `${prefix}-${Date.now().toString().slice(-6)}`;
+}
+
+function redirectWithConversionError(quoteId: string, message: string): never {
+  redirect(`/admin/quotes/${quoteId}?conversionError=${encodeURIComponent(message)}`);
+}
+
+function serviceTypeToTicketType(serviceType: ServiceType, suggestedTicketType: TicketType | null) {
+  if (suggestedTicketType && suggestedTicketType !== TicketType.CALIBRATION) {
+    return suggestedTicketType;
+  }
+
+  if (serviceType === ServiceType.REPAIR) return TicketType.REPAIR;
+  if (serviceType === ServiceType.CUSTOM_SERVICE) return TicketType.CUSTOM_SERVICE;
+  return TicketType.OTHER;
+}
+
+function getQuoteJsonRecord(value: Prisma.JsonValue): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function textFrom(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+async function ensureGeneralDemoWorkspace() {
+  return db.businessWorkspace.upsert({
+    where: { workspaceKey: "general-service-demo" },
+    update: {
+      isActive: true,
+      enabledModules: ["QuoteFlow", "WorkFlow", "Invoicing"],
+    },
+    create: {
+      workspaceKey: "general-service-demo",
+      businessName: "StanleySync App Demo",
+      businessType: BusinessType.GENERAL_SERVICE,
+      industry: "General business operations",
+      serviceCategories: ["Quotes", "Customers", "Jobs", "Invoices", "PDFs"],
+      email: "hello@stanleysync.com",
+      phone: "",
+      website: "https://stanleysync.com",
+      address: "",
+      logoPlaceholder: "APP",
+      themeAccent: "#12212c",
+      brandColors: { primary: "#12212c", accent: "#c46a29" },
+      enabledModules: ["QuoteFlow", "WorkFlow", "Invoicing"],
+      isActive: true,
+    },
+  });
 }
 
 async function getAssignedUserDetails(userId: string | null) {
@@ -193,80 +247,163 @@ export async function updateQuoteAction(formData: FormData) {
 }
 
 export async function convertQuoteToTicketAction(formData: FormData) {
-  const { session } = await requireManagerSession();
+  const { session } = await requireTicketAccess();
   const quoteId = String(formData.get("quoteId"));
   const quote = await db.quoteRequest.findUnique({
     where: { id: quoteId },
     include: { customer: true, ticket: true },
   });
 
-  if (!quote) return;
-
-  if (quote.ticket) {
-    redirect(`/admin/tickets/${quote.ticket.id}`);
+  if (!quote) {
+    redirectWithConversionError(quoteId, "Quote was not found. Refresh the quote list and try again.");
   }
 
+  if (quote.ticket) {
+    redirect(`/admin/tickets/${quote.ticket.id}?conversion=existing`);
+  }
+
+  if (quote.status !== QuoteStatus.ACCEPTED) {
+    redirectWithConversionError(quote.id, "Set the quote status to Accepted before converting it to a job.");
+  }
+
+  if (quote.serviceType === ServiceType.CALIBRATION) {
+    redirectWithConversionError(quote.id, "This quote is marked as Calibration. Use the CalOps work order conversion instead.");
+  }
+
+  const workspaceId = quote.workspaceId ?? (await ensureGeneralDemoWorkspace()).id;
+  const assignee = await getAssignedUserDetails(quote.assignedUserId);
+  const extractedFields = getQuoteJsonRecord(quote.extractedFields);
+  const structuredSummary = getQuoteJsonRecord(quote.structuredSummary);
+  const serviceCategory = textFrom(extractedFields.serviceCategory) ?? quote.serviceType.replace(/_/g, " ");
+  const itemOrProject =
+    quote.equipmentType ??
+    textFrom(extractedFields.projectType) ??
+    textFrom(extractedFields.itemOrProject) ??
+    textFrom(structuredSummary.itemOrProject) ??
+    "Service request";
+  const location =
+    quote.customer.address ??
+    textFrom(structuredSummary.location) ??
+    textFrom(extractedFields.location) ??
+    "Location not captured";
+  const logistics = [
+    quote.serviceMode ? `Service mode: ${quote.serviceMode.replace(/_/g, " ")}` : null,
+    `Location/logistics: ${location}`,
+    quote.requestedTurnaround ? `Requested turnaround: ${quote.requestedTurnaround}` : null,
+  ].filter(Boolean);
+  const notes = [
+    `Source quote: ${quote.quoteNumber}`,
+    `Customer/contact: ${quote.customer.company} / ${quote.customer.mainContact}`,
+    `Service type: ${serviceCategory}`,
+    `Item/project: ${itemOrProject}`,
+    quote.issueDescription ? `Customer notes: ${quote.issueDescription}` : null,
+    quote.aiSummary ? `Structured summary: ${quote.aiSummary}` : null,
+    ...logistics,
+    quote.adminNotes ? `Internal admin notes: ${quote.adminNotes}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
   const ticketNumber = `T-${Date.now().toString().slice(-6)}`;
-  const ticket = await db.ticket.create({
-    data: {
-      ticketNumber,
+  let ticketId: string;
+
+  try {
+    const ticket = await db.ticket.create({
+      data: {
+        ticketNumber,
+        quoteId: quote.id,
+        workspaceId,
+        customerId: quote.customerId,
+        assignedUserId: assignee.assignedUserId,
+        type: serviceTypeToTicketType(quote.serviceType, quote.suggestedTicketType),
+        status: quote.targetDueDate ? TicketStatus.SCHEDULED : TicketStatus.NEW,
+        priority: quote.priority,
+        assignedTo: assignee.assignedTo,
+        dueDate: quote.targetDueDate,
+        quotedAmount: quote.quotedAmount ?? 0,
+        billedAmount: 0,
+        materialsCost: 0,
+        shippingCost: 0,
+        totalCost: 0,
+        profitLoss: 0,
+        notes,
+      },
+    });
+    ticketId = ticket.id;
+
+    await db.quoteRequest.update({
+      where: { id: quote.id },
+      data: {
+        status: QuoteStatus.CONVERTED,
+        workspaceId,
+      },
+    });
+
+    await db.customer.update({
+      where: { id: quote.customerId },
+      data: { workspaceId },
+    });
+
+    await db.activityLog.createMany({
+      data: [
+        {
+          type: ActivityType.QUOTE_CONVERTED_TO_TICKET,
+          entityType: "QuoteRequest",
+          entityId: quote.id,
+          title: "Quote converted to job",
+          description: `${quote.quoteNumber} was converted to ${ticket.ticketNumber}.`,
+          actor: session.user.email ?? "admin",
+          customerId: quote.customerId,
+          quoteId: quote.id,
+          ticketId: ticket.id,
+        },
+        {
+          type: ActivityType.QUOTE_STATUS_CHANGED,
+          entityType: "QuoteRequest",
+          entityId: quote.id,
+          title: "Quote status changed",
+          description: `${quote.quoteNumber} moved to Converted.`,
+          actor: session.user.email ?? "admin",
+          customerId: quote.customerId,
+          quoteId: quote.id,
+          ticketId: ticket.id,
+        },
+        {
+          type: ActivityType.TICKET_CREATED,
+          entityType: "Ticket",
+          entityId: ticket.id,
+          title: "Job created",
+          description: `${ticket.ticketNumber} was created from ${quote.quoteNumber}.`,
+          actor: session.user.email ?? "admin",
+          customerId: quote.customerId,
+          quoteId: quote.id,
+          ticketId: ticket.id,
+        },
+      ],
+    });
+
+    await queueNotificationEvent({
+      workspaceId,
+      type: NotificationEventType.JOB_CREATED,
+      subject: `Job created: ${ticket.ticketNumber}`,
+      payload: { quoteId: quote.id, ticketId: ticket.id, ticketNumber: ticket.ticketNumber },
+    });
+  } catch (error) {
+    console.error("[quotes] General job conversion failed.", {
       quoteId: quote.id,
-      workspaceId: quote.workspaceId,
-      customerId: quote.customerId,
-      assignedUserId: quote.assignedUserId,
-      type: quote.suggestedTicketType ?? TicketType.OTHER,
-      status: TicketStatus.NEW,
-      priority: quote.priority,
-      assignedTo: quote.assignedTo,
-      quotedAmount: quote.quotedAmount,
-      notes: quote.aiSummary,
-    },
-  });
-
-  await db.quoteRequest.update({
-    where: { id: quote.id },
-    data: { status: QuoteStatus.CLOSED },
-  });
-
-  await db.activityLog.createMany({
-    data: [
-      {
-        type: ActivityType.QUOTE_CONVERTED_TO_TICKET,
-        entityType: "QuoteRequest",
-        entityId: quote.id,
-        title: "Quote converted to ticket",
-        description: `${quote.quoteNumber} was converted to ${ticket.ticketNumber}.`,
-        actor: session.user.email ?? "admin",
-        customerId: quote.customerId,
-        quoteId: quote.id,
-        ticketId: ticket.id,
-      },
-      {
-        type: ActivityType.TICKET_CREATED,
-        entityType: "Ticket",
-        entityId: ticket.id,
-        title: "Ticket created",
-        description: `${ticket.ticketNumber} was created from ${quote.quoteNumber}.`,
-        actor: session.user.email ?? "admin",
-        customerId: quote.customerId,
-        quoteId: quote.id,
-        ticketId: ticket.id,
-      },
-    ],
-  });
-
-  await queueNotificationEvent({
-    workspaceId: quote.workspaceId,
-    type: NotificationEventType.JOB_CREATED,
-    subject: `Job created: ${ticket.ticketNumber}`,
-    payload: { quoteId: quote.id, ticketId: ticket.id, ticketNumber: ticket.ticketNumber },
-  });
+      error: error instanceof Error ? error.message : "Unknown conversion error",
+    });
+    redirectWithConversionError(
+      quote.id,
+      "Job conversion failed while saving to the database. Check workspace/customer data and try again.",
+    );
+  }
 
   revalidatePath("/admin");
   revalidatePath("/admin/quotes");
   revalidatePath(`/admin/quotes/${quote.id}`);
   revalidatePath("/admin/tickets");
-  redirect(`/admin/tickets/${ticket.id}`);
+  redirect(`/admin/tickets/${ticketId}?conversion=created`);
 }
 
 export async function addQuoteInternalNoteAction(formData: FormData) {
@@ -587,7 +724,7 @@ export async function createInvoiceFromQuoteAction(formData: FormData) {
 }
 
 export async function createInvoiceFromTicketAction(formData: FormData) {
-  const { session } = await requireManagerSession();
+  const { session } = await requireTicketAccess();
   const ticketId = String(formData.get("ticketId"));
   const ticket = await db.ticket.findUnique({
     where: { id: ticketId },
@@ -1034,7 +1171,7 @@ export async function sendQuoteEmailAction(formData: FormData) {
 }
 
 export async function updateTicketAction(formData: FormData) {
-  const { session } = await requireManagerSession();
+  const { session } = await requireTicketAccess();
   const ticketId = String(formData.get("ticketId"));
   const status = String(formData.get("status")) as TicketStatus;
   const priority = String(formData.get("priority")) as Priority;

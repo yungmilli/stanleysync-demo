@@ -23,11 +23,14 @@ export const dynamic = "force-dynamic";
 
 export default async function QuoteDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ conversionError?: string }>;
 }) {
   const { user } = await requireQuoteAccess();
   const { id } = await params;
+  const query = searchParams ? await searchParams : {};
   const workspaceState = await getWorkspaceSwitcherData(user.id);
   const [quote, assignableUsers] = await Promise.all([
     getQuoteDetail(id, workspaceState.activeWorkspace?.id),
@@ -172,6 +175,11 @@ export default async function QuoteDetailPage({
 
         <div className="space-y-4">
           <DetailCard title="Review controls">
+            {query.conversionError ? (
+              <div className="mb-3 rounded-[0.9rem] border border-[#b4514b]/20 bg-[#fde8e6] px-3.5 py-3 text-sm leading-6 text-[#7f2d27]">
+                General job conversion failed: {query.conversionError}
+              </div>
+            ) : null}
             <QuoteReviewEditor
               quote={{
                 id: quote.id,

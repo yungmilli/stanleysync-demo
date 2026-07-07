@@ -13,11 +13,14 @@ export const dynamic = "force-dynamic";
 
 export default async function TicketDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ conversion?: string }>;
 }) {
   const { user } = await requireRoles([UserRole.ADMIN, UserRole.MANAGER, UserRole.DEMO_USER]);
   const { id } = await params;
+  const query = searchParams ? await searchParams : {};
   const workspaceState = await getWorkspaceSwitcherData(user.id);
   const [ticket, assignableUsers] = await Promise.all([getTicketDetail(id, workspaceState.activeWorkspace?.id), getAssignableUsers()]);
 
@@ -33,6 +36,16 @@ export default async function TicketDetailPage({
           { label: ticket.ticketNumber },
         ]}
       />
+
+      {query.conversion === "created" ? (
+        <div className="rounded-[0.95rem] border border-[#25624f]/20 bg-[#e9f5ef] px-4 py-3 text-sm leading-6 text-[#25624f]">
+          Quote converted successfully. This WorkFlow job is now linked to the source quote.
+        </div>
+      ) : query.conversion === "existing" ? (
+        <div className="rounded-[0.95rem] border border-[#c46a29]/25 bg-[#fff4e6] px-4 py-3 text-sm leading-6 text-[#9e4f18]">
+          This quote already had a linked job, so StanleySync opened the existing job instead of creating a duplicate.
+        </div>
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-[1.02fr_0.98fr]">
         <div className="space-y-4">
