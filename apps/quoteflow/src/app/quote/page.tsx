@@ -1,10 +1,17 @@
 import Link from "next/link";
 
 import { QuoteAssistant } from "@/components/quote/quote-assistant";
-import { getAuthSession } from "@/lib/auth";
+import { getAuthSession, getCurrentAppUser } from "@/lib/auth";
+import { getWorkspaceSwitcherData } from "@/features/workspaces/queries";
 
 export default async function QuotePage() {
   const session = await getAuthSession();
+  const user = session?.user?.email ? await getCurrentAppUser() : null;
+  const workspaceState = user ? await getWorkspaceSwitcherData(user.id) : null;
+  const workspaceKey = workspaceState?.activeWorkspace?.isActive
+    ? workspaceState.activeWorkspace.workspaceKey
+    : undefined;
+
   return (
     <main className="mx-auto max-w-[1440px] px-5 py-4 sm:px-8 lg:px-10">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
@@ -25,7 +32,7 @@ export default async function QuotePage() {
           {session ? "Back to dashboard" : "Back to overview"}
         </Link>
       </div>
-      <QuoteAssistant />
+      <QuoteAssistant workspaceKey={workspaceKey} />
     </main>
   );
 }
