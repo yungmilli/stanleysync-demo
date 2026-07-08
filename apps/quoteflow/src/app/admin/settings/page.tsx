@@ -17,6 +17,7 @@ export default async function SettingsPage() {
   const workspaceState = await getWorkspaceSwitcherData(user.id);
   const { workspace, notifications, auditEvents, workflowStages } = await getSettingsData(workspaceState.activeWorkspace?.id);
   const canManageSettings = user.role === UserRole.SYSTEM_OWNER || user.role === UserRole.ADMIN || user.role === UserRole.MANAGER;
+  const canManageUsers = user.role === UserRole.SYSTEM_OWNER || user.role === UserRole.ADMIN;
   const visibleWorkflowModules = user.role === UserRole.ADMIN
     ? (["QUOTEFLOW", "WORKFLOW", "CALOPS"] as const)
     : (["QUOTEFLOW", "WORKFLOW"] as const);
@@ -33,7 +34,7 @@ export default async function SettingsPage() {
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {[
           ["Business Settings", workspace?.businessName ?? "Active workspace"],
-          ["Users & Roles", user.role === UserRole.SYSTEM_OWNER ? "Manage users" : "System Owner only"],
+          ["Users & Roles", canManageUsers ? "Manage workspace users" : "Admin only"],
           ["Workflow Settings", "Quote and job statuses"],
           ["Notifications", "Email event log"],
           ["Payments", "Invoice payment links"],
@@ -44,7 +45,7 @@ export default async function SettingsPage() {
           <div key={title} className="rounded-[1rem] border border-[#12212c]/8 bg-white/55 p-4">
             <p className="text-sm font-semibold">{title}</p>
             <p className="mt-1 text-sm text-[#64707a]">{body}</p>
-            {title === "Users & Roles" && user.role === UserRole.SYSTEM_OWNER ? (
+            {title === "Users & Roles" && canManageUsers ? (
               <Link href="/admin/settings/users" className="mt-3 inline-flex rounded-full border border-[#12212c]/10 px-3 py-1.5 text-xs font-medium">
                 Open users
               </Link>

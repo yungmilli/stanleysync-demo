@@ -29,6 +29,7 @@ import {
   requireQuoteAccess,
   requireTicketAccess,
   requireSystemOwnerSession,
+  requireUserManagementSession,
 } from "@/features/admin/guards";
 import { buildWorkOrderDraftCreateData } from "@/features/work-orders/payload";
 import { db } from "@/lib/db";
@@ -1427,28 +1428,104 @@ export async function updateTicketAction(formData: FormData) {
   revalidatePath("/admin/financials");
 }
 
+const adminManageableRoles: UserRole[] = [UserRole.MANAGER, UserRole.SALES, UserRole.TECHNICIAN, UserRole.DEMO_USER];
+
+function canAssignRole(actorRole: UserRole, role: UserRole) {
+  if (actorRole === UserRole.SYSTEM_OWNER) return true;
+  return adminManageableRoles.includes(role);
+}
+
+function getManagedWorkspaceId(actor: { role: UserRole; activeWorkspaceId?: string | null }, requestedWorkspaceId: string | null) {
+  if (actor.role === UserRole.SYSTEM_OWNER) return requestedWorkspaceId;
+  return actor.activeWorkspaceId ?? null;
+}
+
+function canManageTargetUser(
+  actor: { id: string; role: UserRole; activeWorkspaceId?: string | null },
+  target: { id: string; role: UserRole; activeWorkspaceId?: string | null },
+) {
+  if (actor.role === UserRole.SYSTEM_OWNER) return true;
+  if (target.role === UserRole.SYSTEM_OWNER || target.role === UserRole.ADMIN) return false;
+  return Boolean(actor.activeWorkspaceId && actor.activeWorkspaceId === target.activeWorkspaceId);
+}
+
+async function canDeactivateUser(target: { role: UserRole; isActive: boolean }, nextActive: boolean) {
+  if (nextActive || target.role !== UserRole.SYSTEM_OWNER || !target.isActive) return true;
+
+  const activeOwnerCount = await db.user.count({
+    where: {
+      role: UserRole.SYSTEM_OWNER,
+      isActive: true,
+    },
+  });
+
+  return activeOwnerCount > 1;
+}
+
+async function recordUserManagementAudit({
+  actor,
+  workspaceId,
+  action,
+  entityId,
+  summary,
+  payload,
+}: {
+  actor: { id: string; email: string };
+  workspaceId: string | null;
+  action: string;
+  entityId: string;
+  summary: string;
+  payload?: Prisma.InputJsonValue;
+}) {
+  await db.auditEvent.create({
+    data: {
+      workspaceId,
+      actorUserId: actor.id,
+      actorEmail: actor.email,
+      action,
+      entityType: "User",
+      entityId,
+      summary,
+      payload,
+    },
+  }).catch((error) => {
+    console.error("[user-management] Audit event failed.", { error: error instanceof Error ? error.name : "UnknownError" });
+  });
+}
+
 export async function createTeamMemberAction(formData: FormData) {
-  await requireSystemOwnerSession();
+  const { user } = await requireUserManagementSession();
 
   const name = optionalString(formData.get("name"));
   const email = optionalString(formData.get("email"))?.toLowerCase() ?? null;
   const role = String(formData.get("role") ?? "") as UserRole;
   const password = optionalString(formData.get("password"));
-  const activeWorkspaceId = optionalString(formData.get("activeWorkspaceId"));
+  const requestedWorkspaceId = optionalString(formData.get("activeWorkspaceId"));
+  const isActive = formData.get("isActive") !== "false";
+  const activeWorkspaceId = getManagedWorkspaceId(user, requestedWorkspaceId);
 
-  if (!name || !email || !password || !Object.values(UserRole).includes(role)) {
+  if (!name || !email || !password || !Object.values(UserRole).includes(role) || !canAssignRole(user.role, role)) {
+    return;
+  }
+
+  if (user.role !== UserRole.SYSTEM_OWNER && !activeWorkspaceId) {
     return;
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
+  const existingUser = await db.user.findUnique({ where: { email } });
 
-  await db.user.upsert({
+  if (existingUser && !canManageTargetUser(user, existingUser)) {
+    return;
+  }
+
+  const savedUser = await db.user.upsert({
     where: { email },
     update: {
       name,
       role,
       passwordHash,
-      isActive: true,
+      isActive,
       activeWorkspaceId,
     },
     create: {
@@ -1456,29 +1533,63 @@ export async function createTeamMemberAction(formData: FormData) {
       email,
       role,
       passwordHash,
-      isActive: true,
+      isActive,
       activeWorkspaceId,
+    },
+  });
+
+  await recordUserManagementAudit({
+    actor: user,
+    workspaceId: activeWorkspaceId,
+    action: existingUser ? "USER_UPDATED" : "USER_CREATED",
+    entityId: savedUser.id,
+    summary: `${user.email} ${existingUser ? "updated" : "created"} user ${savedUser.email}.`,
+    payload: {
+      role,
+      activeWorkspaceId,
+      isActive,
+      temporaryPasswordSet: true,
     },
   });
 
   revalidatePath("/admin/team");
   revalidatePath("/admin/settings/users");
+  redirect("/admin/settings/users?userSaved=1");
 }
 
 export async function updateTeamMemberAction(formData: FormData) {
-  await requireSystemOwnerSession();
+  const { user } = await requireUserManagementSession();
 
   const userId = String(formData.get("userId"));
   const role = String(formData.get("role") ?? "") as UserRole;
   const isActive = formData.get("isActive") === "true";
   const intent = String(formData.get("intent") ?? "update-role");
-  const activeWorkspaceId = optionalString(formData.get("activeWorkspaceId"));
+  const requestedWorkspaceId = optionalString(formData.get("activeWorkspaceId"));
+  const activeWorkspaceId = getManagedWorkspaceId(user, requestedWorkspaceId);
 
   if (!userId || !Object.values(UserRole).includes(role)) {
     return;
   }
 
-  await db.user.update({
+  const target = await db.user.findUnique({ where: { id: userId } });
+
+  if (!target || !canManageTargetUser(user, target)) {
+    return;
+  }
+
+  if (intent === "update-role" && !canAssignRole(user.role, role)) {
+    return;
+  }
+
+  if (target.id === user.id && target.role === UserRole.SYSTEM_OWNER && role !== UserRole.SYSTEM_OWNER) {
+    return;
+  }
+
+  if (intent === "toggle-active" && !(await canDeactivateUser(target, isActive))) {
+    return;
+  }
+
+  const savedUser = await db.user.update({
     where: { id: userId },
     data: {
       ...(intent === "update-role" ? { role } : {}),
@@ -1487,39 +1598,86 @@ export async function updateTeamMemberAction(formData: FormData) {
     },
   });
 
+  await recordUserManagementAudit({
+    actor: user,
+    workspaceId: savedUser.activeWorkspaceId,
+    action: intent === "toggle-active" ? "USER_STATUS_UPDATED" : intent === "assign-workspace" ? "USER_WORKSPACE_UPDATED" : "USER_ROLE_UPDATED",
+    entityId: savedUser.id,
+    summary: `${user.email} updated ${savedUser.email}.`,
+    payload: {
+      intent,
+      role: savedUser.role,
+      activeWorkspaceId: savedUser.activeWorkspaceId,
+      isActive: savedUser.isActive,
+    },
+  });
+
   revalidatePath("/admin/team");
   revalidatePath("/admin/settings/users");
   revalidatePath("/admin");
+  redirect("/admin/settings/users?userSaved=1");
 }
 
 export async function updateTeamMemberProfileAction(formData: FormData) {
-  await requireSystemOwnerSession();
+  const { user } = await requireUserManagementSession();
 
   const userId = String(formData.get("userId"));
   const name = optionalString(formData.get("name"));
   const email = optionalString(formData.get("email"))?.toLowerCase() ?? null;
   const temporaryPassword = optionalString(formData.get("temporaryPassword"));
-  const activeWorkspaceId = optionalString(formData.get("activeWorkspaceId"));
+  const requestedWorkspaceId = optionalString(formData.get("activeWorkspaceId"));
+  const activeWorkspaceId = getManagedWorkspaceId(user, requestedWorkspaceId);
   const role = String(formData.get("role") ?? "") as UserRole;
+  const isActive = formData.get("isActive") === "true";
 
-  if (!userId || !name || !email || !Object.values(UserRole).includes(role)) {
+  if (!userId || !name || !email || !Object.values(UserRole).includes(role) || !canAssignRole(user.role, role)) {
     return;
   }
 
-  await db.user.update({
+  const target = await db.user.findUnique({ where: { id: userId } });
+
+  if (!target || !canManageTargetUser(user, target)) {
+    return;
+  }
+
+  if (target.id === user.id && target.role === UserRole.SYSTEM_OWNER && role !== UserRole.SYSTEM_OWNER) {
+    return;
+  }
+
+  if (!(await canDeactivateUser(target, isActive))) {
+    return;
+  }
+
+  const savedUser = await db.user.update({
     where: { id: userId },
     data: {
       name,
       email,
       role,
       activeWorkspaceId,
+      isActive,
       ...(temporaryPassword ? { passwordHash: await bcrypt.hash(temporaryPassword, 10) } : {}),
+    },
+  });
+
+  await recordUserManagementAudit({
+    actor: user,
+    workspaceId: savedUser.activeWorkspaceId,
+    action: "USER_PROFILE_UPDATED",
+    entityId: savedUser.id,
+    summary: `${user.email} saved changes for ${savedUser.email}.`,
+    payload: {
+      role: savedUser.role,
+      activeWorkspaceId: savedUser.activeWorkspaceId,
+      isActive: savedUser.isActive,
+      temporaryPasswordSet: Boolean(temporaryPassword),
     },
   });
 
   revalidatePath("/admin/settings/users");
   revalidatePath("/admin/team");
   revalidatePath("/admin");
+  redirect("/admin/settings/users?userSaved=1");
 }
 
 const demoCleanupWorkspaceKeys = ["general-service-demo", "auto-repair-demo"];

@@ -48,6 +48,10 @@ export async function requireAdminSession() {
   return requireRoles([UserRole.SYSTEM_OWNER, UserRole.ADMIN]);
 }
 
+export async function requireUserManagementSession() {
+  return requireRoles([UserRole.SYSTEM_OWNER, UserRole.ADMIN]);
+}
+
 export async function requireManagerSession() {
   return requireRoles([UserRole.SYSTEM_OWNER, UserRole.ADMIN, UserRole.MANAGER]);
 }
