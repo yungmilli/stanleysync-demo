@@ -881,47 +881,99 @@ export async function updateInvoiceStatusAction(formData: FormData) {
   const paymentProvider = formData.has("paymentProvider") ? optionalString(formData.get("paymentProvider")) : undefined;
   const requestedPaymentStatus = formData.has("paymentStatus") ? optionalString(formData.get("paymentStatus")) : undefined;
   const paymentInstructions = formData.has("paymentInstructions") ? optionalString(formData.get("paymentInstructions")) : undefined;
+  const paymentMethod = optionalString(formData.get("paymentMethod"));
+  const paymentCardLast4 = optionalString(formData.get("paymentCardLast4"));
+  const paymentDate = optionalString(formData.get("paymentDate"));
+  const paymentReference = optionalString(formData.get("paymentReference"));
+  const paymentNotes = optionalString(formData.get("paymentNotes"));
   const tax = formData.has("tax") ? optionalNumber(formData.get("tax")) ?? 0 : undefined;
   const discount = formData.has("discount") ? optionalNumber(formData.get("discount")) ?? 0 : undefined;
+  const lineItemIds = formData.getAll("lineItemId").map(String);
+  const lineItemDescriptions = formData.getAll("lineItemDescription");
+  const lineItemQuantities = formData.getAll("lineItemQuantity");
+  const lineItemUnitPrices = formData.getAll("lineItemUnitPrice");
   const invoice = await db.invoice.findUnique({
     where: { id: invoiceId },
-    include: { ticket: true, calibrationWorkOrder: true },
+    include: { ticket: true, calibrationWorkOrder: true, lineItems: true },
   });
 
   if (!invoice || !Object.values(InvoiceStatus).includes(status)) return;
   if (user.role !== UserRole.SYSTEM_OWNER && invoice.workspaceId !== user.activeWorkspaceId) return;
+  const isLocked = invoice.status === InvoiceStatus.PAID || invoice.status === InvoiceStatus.VOID;
+  if (isLocked && user.role !== UserRole.SYSTEM_OWNER) return;
+
+  const invoiceLineItemIds = new Set(invoice.lineItems.map((item) => item.id));
+  const lineItemUpdates = lineItemIds.flatMap((id, index) => {
+    if (!invoiceLineItemIds.has(id)) return [];
+    const description = optionalString(lineItemDescriptions[index] ?? null) ?? "Service work";
+    const quantity = optionalNumber(lineItemQuantities[index] ?? null) ?? 1;
+    const unitPrice = optionalNumber(lineItemUnitPrices[index] ?? null) ?? 0;
+    return [{
+      id,
+      description,
+      quantity,
+      unitPrice,
+      amount: quantity * unitPrice,
+    }];
+  });
+  const nextSubtotal = lineItemUpdates.length > 0
+    ? lineItemUpdates.reduce((total, item) => total + item.amount, 0)
+    : invoice.subtotal;
 
   const nextPaymentStatus =
     status === InvoiceStatus.SENT
       ? "SENT"
-      : status === InvoiceStatus.PENDING_PAYMENT
+      : status === InvoiceStatus.IN_PROGRESS
         ? "PENDING"
-        : status === InvoiceStatus.PAID
+      : status === InvoiceStatus.PAID
           ? "PAID"
           : status === InvoiceStatus.VOID
-            ? "VOIDED"
+            ? "CLOSED"
             : requestedPaymentStatus ?? invoice.paymentStatus;
   const nextTax = tax ?? invoice.tax;
   const nextDiscount = discount ?? invoice.discount;
-  const nextTotal = Math.max(0, invoice.subtotal + nextTax - nextDiscount);
+  const nextTotal = Math.max(0, nextSubtotal + nextTax - nextDiscount);
+  const nextPaymentInstructions = paymentInstructions === undefined && !paymentMethod && !paymentCardLast4 && !paymentDate && !paymentReference && !paymentNotes
+    ? invoice.paymentInstructions
+    : [
+        paymentMethod ? `Payment method: ${paymentMethod}` : null,
+        paymentCardLast4 ? `Card last 4: ${paymentCardLast4}` : null,
+        paymentDate ? `Payment date: ${paymentDate}` : null,
+        paymentReference ? `Payment reference: ${paymentReference}` : null,
+        paymentNotes ? `Payment notes: ${paymentNotes}` : null,
+      ].filter(Boolean).join("\n") || paymentInstructions || invoice.paymentInstructions;
 
-  await db.invoice.update({
-    where: { id: invoice.id },
-    data: {
-      status,
-      dueDate: dueDate === undefined ? invoice.dueDate : dueDate,
-      notes: notes === undefined ? invoice.notes : notes,
-      paymentUrl: paymentUrl === undefined ? invoice.paymentUrl : paymentUrl,
-      paymentProvider: paymentProvider === undefined ? invoice.paymentProvider : paymentProvider,
-      paymentInstructions: paymentInstructions === undefined ? invoice.paymentInstructions : paymentInstructions,
-      tax: nextTax,
-      discount: nextDiscount,
-      total: nextTotal,
-      paymentStatus: nextPaymentStatus,
-      sentAt: status === InvoiceStatus.SENT && !invoice.sentAt ? new Date() : invoice.sentAt,
-      paidAt: status === InvoiceStatus.PAID && !invoice.paidAt ? new Date() : invoice.paidAt,
-    },
-  });
+  await db.$transaction([
+    ...lineItemUpdates.map((item) =>
+      db.invoiceLineItem.update({
+        where: { id: item.id },
+        data: {
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          amount: item.amount,
+        },
+      }),
+    ),
+    db.invoice.update({
+      where: { id: invoice.id },
+      data: {
+        status,
+        subtotal: nextSubtotal,
+        dueDate: dueDate === undefined ? invoice.dueDate : dueDate,
+        notes: notes === undefined ? invoice.notes : notes,
+        paymentUrl: paymentUrl === undefined ? invoice.paymentUrl : paymentUrl,
+        paymentProvider: paymentProvider === undefined ? invoice.paymentProvider : paymentProvider,
+        paymentInstructions: nextPaymentInstructions,
+        tax: nextTax,
+        discount: nextDiscount,
+        total: nextTotal,
+        paymentStatus: nextPaymentStatus,
+        sentAt: status === InvoiceStatus.SENT && !invoice.sentAt ? new Date() : invoice.sentAt,
+        paidAt: status === InvoiceStatus.PAID && !invoice.paidAt ? new Date() : invoice.paidAt,
+      },
+    }),
+  ]);
 
   if (invoice.status !== status) {
     await db.activityLog.create({
@@ -949,7 +1001,7 @@ export async function updateInvoiceStatusAction(formData: FormData) {
     });
   }
 
-  const shouldHoldAsInvoicePending = status === InvoiceStatus.SENT || status === InvoiceStatus.PENDING_PAYMENT;
+  const shouldHoldAsInvoicePending = status === InvoiceStatus.SENT || status === InvoiceStatus.IN_PROGRESS;
   const shouldCloseAsPaid = status === InvoiceStatus.PAID;
 
   const linkedTicket = invoice.ticket;
@@ -1218,7 +1270,7 @@ export async function updateTicketAction(formData: FormData) {
 
   const existing = await db.ticket.findUnique({
     where: { id: ticketId },
-    include: { customer: true },
+    include: { customer: true, quote: true, invoices: true },
   });
 
   if (!existing) return;
@@ -1320,6 +1372,52 @@ export async function updateTicketAction(formData: FormData) {
       ticketNumber: existing.ticketNumber,
       dueDate: dueDate?.toISOString() ?? null,
       summary: notes ?? existing.notes ?? "Your StanleySync work order was updated.",
+    });
+  }
+
+  if (status === TicketStatus.INVOICED && existing.invoices.length === 0) {
+    const amount = billedAmount ?? quotedAmount ?? existing.quote?.quotedAmount ?? 0;
+    const totals = calculateInvoiceTotals([{ quantity: 1, unitPrice: amount }]);
+    const invoice = await db.invoice.create({
+      data: {
+        invoiceNumber: nextInvoiceNumber(),
+        workspaceId: existing.workspaceId,
+        customerId: existing.customerId,
+        quoteId: existing.quoteId,
+        ticketId: existing.id,
+        status: InvoiceStatus.DRAFT,
+        subtotal: totals.subtotal,
+        total: totals.total,
+        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        notes,
+        paymentInstructions: "Payment due within 30 days.",
+        lineItems: {
+          create: [
+            {
+              description: `Completed job - ${existing.ticketNumber}`,
+              quantity: 1,
+              unitPrice: amount,
+              amount,
+              sortOrder: 1,
+            },
+          ],
+        },
+      },
+    });
+
+    await db.activityLog.create({
+      data: {
+        type: ActivityType.INVOICE_CREATED,
+        entityType: "Invoice",
+        entityId: invoice.id,
+        title: "Invoice created",
+        description: `${invoice.invoiceNumber} was created when ${existing.ticketNumber} moved to Invoiced.`,
+        actor: session.user.email ?? "admin",
+        customerId: existing.customerId,
+        quoteId: existing.quoteId,
+        ticketId: existing.id,
+        invoiceId: invoice.id,
+      },
     });
   }
 

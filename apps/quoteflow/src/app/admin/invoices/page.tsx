@@ -62,7 +62,7 @@ export default async function InvoicesPage() {
                     </td>
                     <td className="px-3 py-3">{formatDate(invoice.dueDate)}</td>
                     <td className="px-3 py-3">
-                      <StatusBadge label={sentenceCase(invoice.status)} tone={invoice.status === "PAID" ? "success" : "neutral"} />
+                      <StatusBadge label={invoice.status === "VOID" ? "Closed" : sentenceCase(invoice.status)} tone={invoice.status === "PAID" ? "success" : "neutral"} />
                     </td>
                     <td className="px-3 py-3 text-right font-semibold">{formatCurrency(invoice.total)}</td>
                   </tr>

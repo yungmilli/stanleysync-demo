@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { UserRole } from "@prisma/client";
 
+import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 import { Breadcrumbs, DetailCard, KeyValueGrid, StatusBadge, Timeline } from "@/components/admin/ops-ui";
 import { CopyButton } from "@/components/admin/copy-button";
 import { SafeEditForm } from "@/components/admin/safe-edit-form";
@@ -23,6 +24,9 @@ export default async function InvoiceDetailPage({
   const workspaceState = await getWorkspaceSwitcherData(user.id);
   const invoice = await getInvoiceDetail(id, workspaceState.activeWorkspace?.id);
   const canManageInvoice = user.role === UserRole.SYSTEM_OWNER || user.role === UserRole.ADMIN || user.role === UserRole.MANAGER;
+  const isLocked = invoice?.status === "PAID" || invoice?.status === "VOID";
+  const canEditInvoice = canManageInvoice && (!isLocked || user.role === UserRole.SYSTEM_OWNER);
+  const paymentDetails = parsePaymentDetails(invoice?.paymentInstructions);
 
   if (!invoice) {
     notFound();
@@ -44,12 +48,12 @@ export default async function InvoiceDetailPage({
             title={`${invoice.invoiceNumber} - ${invoice.customer.company}`}
             action={
               <a href={`/api/invoices/${invoice.id}/pdf`} className="inline-flex rounded-full bg-[#12212c] px-4 py-2 text-sm font-medium text-white">
-                Export Invoice PDF
+                {invoice.status === "PAID" ? "Export Paid Invoice PDF" : "Export Invoice PDF"}
               </a>
             }
           >
             <div className="mb-4 flex flex-wrap gap-2">
-              <StatusBadge label={sentenceCase(invoice.status)} tone={invoice.status === "PAID" ? "success" : "neutral"} />
+              <StatusBadge label={invoiceStatusLabel(invoice.status)} tone={invoice.status === "PAID" ? "success" : "neutral"} />
               <StatusBadge label={`Due ${formatDate(invoice.dueDate)}`} tone="neutral" />
             </div>
             <KeyValueGrid
@@ -69,7 +73,7 @@ export default async function InvoiceDetailPage({
               <table className="w-full border-collapse text-sm">
                 <thead className="bg-white/65 text-left text-xs uppercase tracking-[0.1em] text-[#64707a]">
                   <tr>
-                    <th className="px-3 py-2">Description</th>
+                  <th className="px-3 py-2">Description</th>
                     <th className="px-3 py-2 text-right">Qty</th>
                     <th className="px-3 py-2 text-right">Unit</th>
                     <th className="px-3 py-2 text-right">Amount</th>
@@ -114,8 +118,18 @@ export default async function InvoiceDetailPage({
 
         <div className="space-y-4">
           <DetailCard title="Invoice controls">
-            {canManageInvoice ? (
-            <SafeEditForm action={updateInvoiceStatusAction} saveLabel="Save invoice changes">
+            {canEditInvoice ? (
+            <SafeEditForm
+              action={updateInvoiceStatusAction}
+              saveLabel="Save invoice changes"
+              editLabel="Edit invoice"
+              startLocked
+              lockedMessage={
+                canEditInvoice
+                  ? "Invoice is locked until you choose Edit invoice."
+                  : "Paid/closed invoices are locked. System Owner can override if needed."
+              }
+            >
               <input type="hidden" name="invoiceId" value={invoice.id} />
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block text-sm">
@@ -128,10 +142,9 @@ export default async function InvoiceDetailPage({
                     <option value="DRAFT">Draft</option>
                     <option value="SENT">Sent</option>
                     <option value="IN_PROGRESS">In progress</option>
-                    <option value="PENDING_PAYMENT">Pending payment</option>
                     <option value="PAID">Paid</option>
                     <option value="ON_HOLD">On hold</option>
-                    <option value="VOID">Void</option>
+                    <option value="VOID">Closed</option>
                   </select>
                 </label>
                 <label className="block text-sm">
@@ -147,6 +160,25 @@ export default async function InvoiceDetailPage({
               <div className="grid gap-3 sm:grid-cols-2">
                 <CurrencyField name="tax" label="Tax" defaultValue={invoice.tax} />
                 <CurrencyField name="discount" label="Discount" defaultValue={invoice.discount} />
+              </div>
+              <div className="space-y-2 rounded-[0.9rem] border border-[#12212c]/8 bg-white/55 p-3">
+                <p className="text-sm font-semibold">Line items</p>
+                {invoice.lineItems.map((item) => (
+                  <div key={item.id} className="grid gap-2 rounded-[0.75rem] border border-[#12212c]/8 bg-white/70 p-2">
+                    <input type="hidden" name="lineItemId" value={item.id} />
+                    <label className="grid gap-1 text-xs text-[#64707a]">
+                      Description
+                      <input name="lineItemDescription" defaultValue={item.description} className="h-9 rounded-[0.7rem] border border-[#12212c]/10 bg-white px-2.5 text-sm text-[#12212c]" />
+                    </label>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="grid gap-1 text-xs text-[#64707a]">
+                        Qty
+                        <input name="lineItemQuantity" defaultValue={item.quantity} className="h-9 rounded-[0.7rem] border border-[#12212c]/10 bg-white px-2.5 text-sm text-[#12212c]" />
+                      </label>
+                      <CurrencyField name="lineItemUnitPrice" label="Unit price" defaultValue={item.unitPrice} compact />
+                    </div>
+                  </div>
+                ))}
               </div>
               <label className="block text-sm">
                 <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Invoice notes</span>
@@ -179,14 +211,38 @@ export default async function InvoiceDetailPage({
                     <option value="VOIDED">Voided</option>
                   </select>
                 </label>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm">
+                    <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Payment method</span>
+                    <input name="paymentMethod" defaultValue={paymentDetails.method} placeholder="Card, ACH, check" className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3" />
+                  </label>
+                  <label className="block text-sm">
+                    <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Card last 4</span>
+                    <input name="paymentCardLast4" defaultValue={paymentDetails.last4} maxLength={4} className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3" />
+                  </label>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm">
+                    <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Payment date</span>
+                    <input name="paymentDate" type="date" defaultValue={paymentDetails.date} className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3" />
+                  </label>
+                  <label className="block text-sm">
+                    <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Reference / transaction ID</span>
+                    <input name="paymentReference" defaultValue={paymentDetails.reference} className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3" />
+                  </label>
+                </div>
                 <label className="block text-sm">
-                  <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Payment instructions</span>
-                  <textarea name="paymentInstructions" defaultValue={invoice.paymentInstructions ?? ""} rows={3} className="w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 py-2" />
+                  <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Payment/reference notes</span>
+                  <textarea name="paymentNotes" defaultValue={paymentDetails.notes || invoice.paymentInstructions || ""} rows={3} className="w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 py-2" />
                 </label>
               </div>
             </SafeEditForm>
             ) : (
-              <p className="text-sm text-[#64707a]">Demo users can review invoice details and PDFs. Invoice controls are admin-only.</p>
+              <p className="text-sm text-[#64707a]">
+                {canManageInvoice
+                  ? "This invoice is paid/closed and locked. System Owner can override if needed."
+                  : "Demo users can review invoice details and PDFs. Invoice controls are admin-only."}
+              </p>
             )}
             {canManageInvoice ? (
               <div className="mt-3 flex flex-wrap gap-2">
@@ -197,10 +253,29 @@ export default async function InvoiceDetailPage({
                 </form>
                 <form action={markInvoicePaidAction}>
                   <input type="hidden" name="invoiceId" value={invoice.id} />
-                  <button type="submit" className="rounded-full border border-[#12212c]/10 bg-white/70 px-4 py-2 text-sm font-medium">Mark as paid</button>
+                  <ConfirmSubmitButton
+                    label="Mark as paid"
+                    message={`Mark ${invoice.invoiceNumber} as paid and close the linked job?`}
+                    className="rounded-full border border-[#12212c]/10 bg-white/70 px-4 py-2 text-sm font-medium"
+                  />
                 </form>
               </div>
             ) : null}
+            <div className="mt-4 rounded-[0.9rem] border border-[#12212c]/8 bg-white/55 p-3 text-sm">
+              <p className="font-semibold">Payment record</p>
+              <KeyValueGrid
+                items={[
+                  { label: "Provider", value: invoice.paymentProvider ?? "Not set" },
+                  { label: "Payment link", value: invoice.paymentUrl ?? "Not set" },
+                  { label: "Method", value: paymentDetails.method || "Not set" },
+                  { label: "Card last 4", value: paymentDetails.last4 || "Not set" },
+                  { label: "Payment date", value: paymentDetails.date || formatDate(invoice.paidAt) },
+                  { label: "Reference", value: paymentDetails.reference || "Not set" },
+                  { label: "Payment status", value: normalizePaymentStatus(invoice.paymentStatus) },
+                  { label: "Notes", value: paymentDetails.notes || "Not set" },
+                ]}
+              />
+            </div>
             <div className="mt-3 flex flex-wrap gap-2">
               {invoice.quote ? <Link href={`/admin/quotes/${invoice.quote.id}`} className="rounded-full border border-[#12212c]/10 px-3 py-1.5 text-xs font-medium">Open quote</Link> : null}
               {invoice.ticket ? <Link href={`/admin/tickets/${invoice.ticket.id}`} className="rounded-full border border-[#12212c]/10 px-3 py-1.5 text-xs font-medium">Open job</Link> : null}
@@ -225,7 +300,7 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
   );
 }
 
-function CurrencyField({ name, label, defaultValue }: { name: string; label: string; defaultValue?: number | null }) {
+function CurrencyField({ name, label, defaultValue, compact }: { name: string; label: string; defaultValue?: number | null; compact?: boolean }) {
   return (
     <label className="block text-sm">
       <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">{label}</span>
@@ -234,7 +309,7 @@ function CurrencyField({ name, label, defaultValue }: { name: string; label: str
         <input
           name={name}
           defaultValue={defaultValue ?? 0}
-          className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 pl-7"
+          className={`${compact ? "h-9 rounded-[0.7rem] bg-white text-sm" : "h-10 rounded-[0.8rem] bg-white/70"} w-full border border-[#12212c]/10 px-3 pl-7`}
         />
       </span>
     </label>
@@ -244,4 +319,36 @@ function CurrencyField({ name, label, defaultValue }: { name: string; label: str
 function normalizePaymentStatus(status?: string | null) {
   if (!status || status === "UNPAID" || status === "LINK_READY") return "NOT_SENT";
   return status;
+}
+
+function invoiceStatusLabel(status: string) {
+  return status === "VOID" ? "Closed" : sentenceCase(status);
+}
+
+function parsePaymentDetails(value?: string | null) {
+  const details = {
+    method: "",
+    last4: "",
+    date: "",
+    reference: "",
+    notes: "",
+  };
+
+  for (const line of (value ?? "").split(/\r?\n/)) {
+    const [rawLabel, ...rest] = line.split(":");
+    const label = rawLabel.trim().toLowerCase();
+    const nextValue = rest.join(":").trim();
+    if (!nextValue) continue;
+    if (label === "payment method") details.method = nextValue;
+    else if (label === "card last 4") details.last4 = nextValue;
+    else if (label === "payment date") details.date = nextValue;
+    else if (label === "payment reference") details.reference = nextValue;
+    else if (label === "payment notes") details.notes = nextValue;
+  }
+
+  if (!details.notes && value && !value.includes("Payment method:")) {
+    details.notes = value;
+  }
+
+  return details;
 }

@@ -25,11 +25,13 @@ export async function GET(
   if (!canExportWorkspaceRecord(user, invoice.workspaceId)) {
     return exportErrorResponse(request, "This invoice belongs to a different workspace.", 403);
   }
+  const paymentDetails = parsePaymentDetails(invoice.paymentInstructions);
+  const isPaid = invoice.status === "PAID";
 
   const buffer = createProfessionalPdf({
-    title: "Invoice",
+    title: isPaid ? "Invoice - Receipt Copy" : "Invoice",
     documentNumber: invoice.invoiceNumber,
-    status: sentenceCase(invoice.status),
+    status: isPaid ? "Paid / Receipt Copy" : invoice.status === "VOID" ? "Closed" : sentenceCase(invoice.status),
     customerBlock: compactLines([
       invoice.customer.company,
       invoice.customer.mainContact,
@@ -62,16 +64,26 @@ export async function GET(
         },
       },
       {
-        title: "Payment Instructions",
+        title: isPaid ? "Payment Proof" : "Payment Instructions",
         table: {
           headers: ["Field", "Details"],
           widths: [150, 366],
-          rows: compactRows([
-            ["Payment due date", formatDate(invoice.dueDate)],
-            ["Payment method / link", invoice.paymentUrl ?? invoice.paymentInstructions ?? "Payment details provided by business office"],
-            ["Provider", invoice.paymentProvider],
-            ["Notes", invoice.notes],
-          ]),
+          rows: isPaid
+            ? compactRows([
+                ["Payment method", paymentDetails.method],
+                ["Provider", invoice.paymentProvider],
+                ["Transaction / reference", paymentDetails.reference],
+                ["Payment date", paymentDetails.date || formatDate(invoice.paidAt)],
+                ["Amount paid", formatCurrency(invoice.total)],
+                ["Card last 4", paymentDetails.last4],
+                ["Notes", paymentDetails.notes || invoice.notes],
+              ])
+            : compactRows([
+                ["Payment due date", formatDate(invoice.dueDate)],
+                ["Payment method / link", invoice.paymentUrl ?? invoice.paymentInstructions ?? "Payment details provided by business office"],
+                ["Provider", invoice.paymentProvider],
+                ["Notes", invoice.notes],
+              ]),
         },
       },
     ],
@@ -79,7 +91,7 @@ export async function GET(
       ["Subtotal", formatCurrency(invoice.subtotal)],
       ["Tax", formatCurrency(invoice.tax)],
       ["Discount", formatCurrency(invoice.discount)],
-      ["Total due", formatCurrency(invoice.total)],
+      [isPaid ? "Amount paid" : "Total due", formatCurrency(invoice.total)],
     ],
     terms: invoiceTerms(invoice.workspace),
     signatureLabel: "Received / approved by",
@@ -98,4 +110,32 @@ function compactRows(rows: Array<[string, string | null | undefined]>) {
   return rows
     .filter(([, value]) => Boolean(value?.trim()))
     .map(([label, value]) => [label, value ?? ""]);
+}
+
+function parsePaymentDetails(value?: string | null) {
+  const details = {
+    method: "",
+    last4: "",
+    date: "",
+    reference: "",
+    notes: "",
+  };
+
+  for (const line of (value ?? "").split(/\r?\n/)) {
+    const [rawLabel, ...rest] = line.split(":");
+    const label = rawLabel.trim().toLowerCase();
+    const nextValue = rest.join(":").trim();
+    if (!nextValue) continue;
+    if (label === "payment method") details.method = nextValue;
+    else if (label === "card last 4") details.last4 = nextValue;
+    else if (label === "payment date") details.date = nextValue;
+    else if (label === "payment reference") details.reference = nextValue;
+    else if (label === "payment notes") details.notes = nextValue;
+  }
+
+  if (!details.notes && value && !value.includes("Payment method:")) {
+    details.notes = value;
+  }
+
+  return details;
 }
