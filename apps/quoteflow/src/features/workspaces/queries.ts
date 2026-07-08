@@ -50,6 +50,34 @@ function getSafeModeWorkspace(): BusinessWorkspace {
   };
 }
 
+function getUnassignedWorkspace(): BusinessWorkspace {
+  const now = new Date();
+
+  return {
+    id: "no-assigned-workspace",
+    workspaceKey: "no-assigned-workspace",
+    businessName: "No workspace assigned",
+    businessType: BusinessType.GENERAL_SERVICE,
+    industry: "Access setup required",
+    serviceCategories: [],
+    email: null,
+    phone: null,
+    website: null,
+    address: null,
+    logoPlaceholder: "NA",
+    logoUrl: null,
+    invoiceTerms: null,
+    quoteTerms: null,
+    setupCompletedAt: null,
+    themeAccent: "#8b959c",
+    brandColors: { primary: "#12212c", accent: "#8b959c" },
+    enabledModules: [],
+    isActive: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 async function ensureDefaultWorkspace() {
   try {
     const existingWorkspace = await db.businessWorkspace.findFirst({
@@ -129,10 +157,10 @@ export async function getWorkspaceSwitcherData(userId: string) {
         });
 
   const isSystemOwner = userId === "env-admin" || user?.role === "SYSTEM_OWNER";
-  const activeWorkspace =
-    workspaces.find((workspace) => workspace.id === user?.activeWorkspaceId) ??
-    workspaces[0] ??
-    null;
+  const assignedWorkspace = workspaces.find((workspace) => workspace.id === user?.activeWorkspaceId) ?? null;
+  const activeWorkspace = isSystemOwner
+    ? assignedWorkspace ?? workspaces[0] ?? null
+    : assignedWorkspace ?? getUnassignedWorkspace();
   const visibleWorkspaces = isSystemOwner ? workspaces : activeWorkspace ? [activeWorkspace] : [];
 
   return {

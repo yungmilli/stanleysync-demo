@@ -4,7 +4,8 @@ import { UserRole } from "@prisma/client";
 
 import { Breadcrumbs, DetailCard, KeyValueGrid, StatusBadge, Timeline } from "@/components/admin/ops-ui";
 import { CopyButton } from "@/components/admin/copy-button";
-import { markInvoicePaidAction, markInvoiceSentAction, updateInvoicePaymentLinkAction, updateInvoiceStatusAction } from "@/features/admin/actions";
+import { SafeEditForm } from "@/components/admin/safe-edit-form";
+import { markInvoicePaidAction, markInvoiceSentAction, updateInvoiceStatusAction } from "@/features/admin/actions";
 import { requireQuoteAccess } from "@/features/admin/guards";
 import { getInvoiceDetail } from "@/features/ops/queries";
 import { getWorkspaceSwitcherData } from "@/features/workspaces/queries";
@@ -114,34 +115,45 @@ export default async function InvoiceDetailPage({
         <div className="space-y-4">
           <DetailCard title="Invoice controls">
             {canManageInvoice ? (
-            <form action={updateInvoiceStatusAction} className="space-y-3">
+            <SafeEditForm action={updateInvoiceStatusAction} saveLabel="Save invoice changes">
               <input type="hidden" name="invoiceId" value={invoice.id} />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Status</span>
+                  <select
+                    name="status"
+                    defaultValue={invoice.status}
+                    className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3"
+                  >
+                    <option value="DRAFT">Draft</option>
+                    <option value="SENT">Sent</option>
+                    <option value="IN_PROGRESS">In progress</option>
+                    <option value="PENDING_PAYMENT">Pending payment</option>
+                    <option value="PAID">Paid</option>
+                    <option value="ON_HOLD">On hold</option>
+                    <option value="VOID">Void</option>
+                  </select>
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Due date</span>
+                  <input
+                    type="date"
+                    name="dueDate"
+                    defaultValue={invoice.dueDate ? invoice.dueDate.toISOString().slice(0, 10) : ""}
+                    className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3"
+                  />
+                </label>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <CurrencyField name="tax" label="Tax" defaultValue={invoice.tax} />
+                <CurrencyField name="discount" label="Discount" defaultValue={invoice.discount} />
+              </div>
               <label className="block text-sm">
-                <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Status</span>
-                <select
-                  name="status"
-                  defaultValue={invoice.status}
-                  className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3"
-                >
-                  <option value="DRAFT">Draft</option>
-                  <option value="SENT">Sent</option>
-                  <option value="IN_PROGRESS">In progress</option>
-                  <option value="PENDING_PAYMENT">Pending payment</option>
-                  <option value="PAID">Paid</option>
-                  <option value="ON_HOLD">On hold</option>
-                  <option value="VOID">Void</option>
-                </select>
+                <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Invoice notes</span>
+                <textarea name="notes" defaultValue={invoice.notes ?? ""} rows={3} className="w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 py-2" />
               </label>
-              <button type="submit" className="rounded-full bg-[#12212c] px-4 py-2 text-sm font-medium text-white">
-                Save invoice status
-              </button>
-            </form>
-            ) : (
-              <p className="text-sm text-[#64707a]">Demo users can review invoice details and PDFs. Invoice controls are admin-only.</p>
-            )}
-            {canManageInvoice ? (
-              <form action={updateInvoicePaymentLinkAction} className="mt-4 space-y-3 rounded-[0.9rem] border border-[#12212c]/8 bg-white/55 p-3">
-                <input type="hidden" name="invoiceId" value={invoice.id} />
+              <div className="mt-4 space-y-3 rounded-[0.9rem] border border-[#12212c]/8 bg-white/55 p-3">
+                <p className="text-sm font-semibold">Payment link</p>
                 <label className="block text-sm">
                   <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Payment provider</span>
                   <select name="paymentProvider" defaultValue={invoice.paymentProvider ?? "Manual Link"} className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3">
@@ -171,11 +183,11 @@ export default async function InvoiceDetailPage({
                   <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Payment instructions</span>
                   <textarea name="paymentInstructions" defaultValue={invoice.paymentInstructions ?? ""} rows={3} className="w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 py-2" />
                 </label>
-                <div className="flex flex-wrap gap-2">
-                  <button type="submit" className="rounded-full bg-[#12212c] px-4 py-2 text-sm font-medium text-white">Save payment link</button>
-                </div>
-              </form>
-            ) : null}
+              </div>
+            </SafeEditForm>
+            ) : (
+              <p className="text-sm text-[#64707a]">Demo users can review invoice details and PDFs. Invoice controls are admin-only.</p>
+            )}
             {canManageInvoice ? (
               <div className="mt-3 flex flex-wrap gap-2">
                 {invoice.paymentUrl ? <CopyButton value={invoice.paymentUrl} /> : null}
@@ -210,6 +222,22 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
       <span>{label}</span>
       <span>{value}</span>
     </div>
+  );
+}
+
+function CurrencyField({ name, label, defaultValue }: { name: string; label: string; defaultValue?: number | null }) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">{label}</span>
+      <span className="relative block">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-[#64707a]">$</span>
+        <input
+          name={name}
+          defaultValue={defaultValue ?? 0}
+          className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 pl-7"
+        />
+      </span>
+    </label>
   );
 }
 

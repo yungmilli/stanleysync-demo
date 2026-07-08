@@ -33,7 +33,6 @@ const PAGE_HEIGHT = 792;
 const MARGIN = 48;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 const BOTTOM_MARGIN = 62;
-const BRAND_LOGO_PATH = path.join("public", "brand", "stanleysync-ai-logo.jpg");
 
 function escapePdfText(value: string) {
   return value
@@ -74,10 +73,11 @@ function getJpegSize(buffer: Buffer) {
 }
 
 function loadLogo(logoUrl?: string | null) {
+  if (!logoUrl) return null;
   const relativeLogoPath = logoUrl?.startsWith("/")
     ? logoUrl.slice(1)
     : logoUrl;
-  const logoPath = resolvePublicAsset(relativeLogoPath || BRAND_LOGO_PATH) ?? resolvePublicAsset(BRAND_LOGO_PATH);
+  const logoPath = resolvePublicAsset(relativeLogoPath);
   if (!logoPath) return null;
   const buffer = fs.readFileSync(logoPath);
   const size = getJpegSize(buffer);
@@ -91,6 +91,14 @@ function rgb(r: number, g: number, b: number) {
 
 function textCommand(text: string, x: number, y: number, size = 10, font = "F1", color = rgb(20, 31, 43)) {
   return `BT /${font} ${size} Tf ${color} rg 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm (${escapePdfText(text)}) Tj ET`;
+}
+
+function estimateTextWidth(text: string, size = 10) {
+  return escapePdfText(text).length * size * 0.52;
+}
+
+function rightTextCommand(text: string, rightX: number, y: number, size = 10, font = "F1", color = rgb(20, 31, 43)) {
+  return textCommand(text, rightX - estimateTextWidth(text, size), y, size, font, color);
 }
 
 function lineCommand(x1: number, y1: number, x2: number, y2: number, color = rgb(205, 214, 222), width = 0.8) {
@@ -129,9 +137,16 @@ function fitImage(width: number, height: number, maxWidth: number, maxHeight: nu
   return { width: width * ratio, height: height * ratio };
 }
 
+function isMoneyLikeHeader(header: string) {
+  return /^(qty|unit|unit price|amount|estimate|total|price|cost)$/i.test(header.trim());
+}
+
 function buildPageAwareContent(input: ProfessionalPdfInput, logo: ReturnType<typeof loadLogo>) {
   const pages: string[][] = [[]];
   let y = PAGE_HEIGHT - 50;
+  const cleanBlock = (lines?: string[]) => (lines ?? []).map((line) => line.trim()).filter(Boolean);
+  const businessLines = cleanBlock(input.contactBlock);
+  const businessName = businessLines[0] ?? "Business";
 
   const current = () => pages[pages.length - 1];
   const ensureSpace = (height: number) => {
@@ -150,7 +165,7 @@ function buildPageAwareContent(input: ProfessionalPdfInput, logo: ReturnType<typ
   const addLabelValue = (label: string, value: string, x: number) => {
     ensureSpace(18);
     current().push(textCommand(label.toUpperCase(), x, y, 7, "F2", rgb(103, 113, 124)));
-    const lines = wrapText(formatLine(value), 146, 8).slice(0, 2);
+    const lines = wrapText(formatLine(value), 176, 8).slice(0, 3);
     lines.forEach((line, index) => current().push(textCommand(line, x + 98, y - index * 10, 8, "F1", rgb(20, 31, 43))));
     y -= Math.max(16, lines.length * 10 + 6);
   };
@@ -169,7 +184,12 @@ function buildPageAwareContent(input: ProfessionalPdfInput, logo: ReturnType<typ
     let x = MARGIN;
     current().push(rectCommand(MARGIN, y - 16, CONTENT_WIDTH, 22, rgb(235, 241, 245)));
     for (const [index, header] of table.headers.entries()) {
-      current().push(textCommand(header, x + 6, y - 8, 8, "F2", rgb(40, 52, 64)));
+      const alignRight = isMoneyLikeHeader(header);
+      current().push(
+        alignRight
+          ? rightTextCommand(header, x + normalizedWidths[index] - 6, y - 8, 8, "F2", rgb(40, 52, 64))
+          : textCommand(header, x + 6, y - 8, 8, "F2", rgb(40, 52, 64)),
+      );
       x += normalizedWidths[index];
     }
     y -= 25;
@@ -180,8 +200,13 @@ function buildPageAwareContent(input: ProfessionalPdfInput, logo: ReturnType<typ
       x = MARGIN;
       current().push(lineCommand(MARGIN, y + 7, PAGE_WIDTH - MARGIN, y + 7, rgb(226, 232, 237), 0.5));
       for (const [index, lines] of cellLines.entries()) {
+        const alignRight = isMoneyLikeHeader(table.headers[index]);
         lines.forEach((line, lineIndex) => {
-          current().push(textCommand(line, x + 6, y - lineIndex * 10, lineIndex === 0 ? 8 : 7, "F1", lineIndex === 0 ? rgb(20, 31, 43) : rgb(89, 101, 113)));
+          current().push(
+            alignRight
+              ? rightTextCommand(line, x + normalizedWidths[index] - 6, y - lineIndex * 10, lineIndex === 0 ? 8 : 7, "F1", lineIndex === 0 ? rgb(20, 31, 43) : rgb(89, 101, 113))
+              : textCommand(line, x + 6, y - lineIndex * 10, lineIndex === 0 ? 8 : 7, "F1", lineIndex === 0 ? rgb(20, 31, 43) : rgb(89, 101, 113)),
+          );
         });
         x += normalizedWidths[index];
       }
@@ -190,35 +215,34 @@ function buildPageAwareContent(input: ProfessionalPdfInput, logo: ReturnType<typ
     y -= 6;
   };
 
-  current().push(rectCommand(0, PAGE_HEIGHT - 118, PAGE_WIDTH, 118, rgb(12, 22, 33)));
-  current().push(rectCommand(0, PAGE_HEIGHT - 122, PAGE_WIDTH, 4, rgb(16, 163, 206)));
+  current().push(rectCommand(0, PAGE_HEIGHT - 98, PAGE_WIDTH, 98, rgb(255, 255, 255)));
+  current().push(lineCommand(MARGIN, PAGE_HEIGHT - 101, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 101, rgb(190, 202, 212), 1));
   if (logo) {
-    const logoBox = fitImage(logo.width, logo.height, 72, 54);
-    current().push(imageCommand(MARGIN, PAGE_HEIGHT - 95, logoBox.width, logoBox.height));
+    const logoBox = fitImage(logo.width, logo.height, 54, 40);
+    current().push(imageCommand(MARGIN, PAGE_HEIGHT - 72, logoBox.width, logoBox.height));
+    current().push(textCommand(businessName, MARGIN + 68, PAGE_HEIGHT - 55, 13, "F2", rgb(20, 31, 43)));
   } else {
-    current().push(textCommand("StanleySync", MARGIN, PAGE_HEIGHT - 72, 18, "F2", rgb(255, 255, 255)));
+    current().push(textCommand(businessName, MARGIN, PAGE_HEIGHT - 55, 14, "F2", rgb(20, 31, 43)));
   }
-  current().push(textCommand("STANLEYSYNC APP", MARGIN + 88, PAGE_HEIGHT - 58, 8, "F2", rgb(125, 214, 242)));
-  current().push(textCommand("Quote. Track. Invoice. All in one place.", MARGIN + 88, PAGE_HEIGHT - 76, 10, "F1", rgb(230, 237, 243)));
-  current().push(textCommand(input.title.toUpperCase(), PAGE_WIDTH - 230, PAGE_HEIGHT - 60, 23, "F2", rgb(255, 255, 255)));
-  current().push(textCommand(input.documentNumber, PAGE_WIDTH - 230, PAGE_HEIGHT - 83, 11, "F1", rgb(205, 218, 229)));
+  current().push(textCommand(input.title.toUpperCase(), PAGE_WIDTH - 230, PAGE_HEIGHT - 55, 22, "F2", rgb(20, 31, 43)));
+  current().push(textCommand(input.documentNumber, PAGE_WIDTH - 230, PAGE_HEIGHT - 78, 10, "F1", rgb(70, 82, 94)));
   if (input.status) {
-    current().push(rectCommand(PAGE_WIDTH - 230, PAGE_HEIGHT - 108, 120, 17, rgb(14, 121, 152)));
-    current().push(textCommand(input.status.toUpperCase(), PAGE_WIDTH - 222, PAGE_HEIGHT - 103, 8, "F2", rgb(255, 255, 255)));
+    current().push(rectCommand(PAGE_WIDTH - 230, PAGE_HEIGHT - 95, 120, 17, rgb(235, 241, 245), rgb(203, 214, 223)));
+    current().push(textCommand(input.status.toUpperCase(), PAGE_WIDTH - 222, PAGE_HEIGHT - 90, 8, "F2", rgb(20, 31, 43)));
   }
 
-  y = PAGE_HEIGHT - 148;
+  y = PAGE_HEIGHT - 128;
   current().push(textCommand("BILL TO / CUSTOMER", MARGIN, y, 8, "F2", rgb(8, 80, 115)));
   current().push(textCommand("BUSINESS / CONTACT", 332, y, 8, "F2", rgb(8, 80, 115)));
   y -= 18;
-  const customerLines = input.customerBlock.map(formatLine);
-  const contactLines = (input.contactBlock?.length ? input.contactBlock : ["StanleySync App", "hello@stanleysync.app", "Company profile not configured"]).map(formatLine);
+  const customerLines = cleanBlock(input.customerBlock);
+  const contactLines = businessLines;
   const blockStartY = y;
   const customerWrapped = customerLines.flatMap((line) => wrapText(line, 238, 9)).slice(0, 7);
   const contactWrapped = contactLines.flatMap((line) => wrapText(line, 210, 9)).slice(0, 7);
   customerWrapped.forEach((line, index) => current().push(textCommand(line, MARGIN, blockStartY - index * 13, 9)));
   contactWrapped.forEach((line, index) => current().push(textCommand(line, 332, blockStartY - index * 13, 9)));
-  y -= Math.max(customerWrapped.length, contactWrapped.length, 3) * 13 + 18;
+  y -= Math.max(customerWrapped.length, contactWrapped.length, 2) * 13 + 18;
 
   addSectionTitle("Document Details");
   for (let index = 0; index < input.meta.length; index += 2) {
@@ -239,16 +263,20 @@ function buildPageAwareContent(input: ProfessionalPdfInput, logo: ReturnType<typ
 
   if (input.totals?.length) {
     addSectionTitle("Totals");
-    const boxWidth = 240;
+    const boxWidth = 260;
     const boxX = PAGE_WIDTH - MARGIN - boxWidth;
-    ensureSpace(input.totals.length * 20 + 24);
-    current().push(rectCommand(boxX, y - input.totals.length * 20 - 8, boxWidth, input.totals.length * 20 + 22, rgb(245, 248, 250), rgb(210, 220, 228)));
+    ensureSpace(input.totals.length * 22 + 30);
+    current().push(rectCommand(boxX, y - input.totals.length * 22 - 10, boxWidth, input.totals.length * 22 + 26, rgb(245, 248, 250), rgb(210, 220, 228)));
     for (const [index, [label, value]] of input.totals.entries()) {
       const isLast = index === input.totals.length - 1;
-      current().push(textCommand(label, boxX + 12, y - index * 20, isLast ? 11 : 9, isLast ? "F2" : "F1"));
-      current().push(textCommand(value, boxX + 138, y - index * 20, isLast ? 11 : 9, isLast ? "F2" : "F1"));
+      const rowY = y - index * 22;
+      if (isLast && input.totals.length > 1) {
+        current().push(lineCommand(boxX + 12, rowY + 12, boxX + boxWidth - 12, rowY + 12, rgb(190, 202, 212), 0.8));
+      }
+      current().push(textCommand(label, boxX + 12, rowY, isLast ? 12 : 9, isLast ? "F2" : "F1"));
+      current().push(rightTextCommand(value, boxX + boxWidth - 14, rowY, isLast ? 13 : 9, "F2"));
     }
-    y -= input.totals.length * 20 + 24;
+    y -= input.totals.length * 22 + 28;
   }
 
   addSectionTitle("Terms and Approval");

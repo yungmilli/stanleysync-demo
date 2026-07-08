@@ -3,7 +3,7 @@ import { companyContactBlock, documentFooter } from "@/lib/company-profile";
 import { db } from "@/lib/db";
 import { canExportForRole, canExportWorkspaceRecord, exportErrorResponse, ticketPdfExportRoles } from "@/lib/export-permissions";
 import { createProfessionalPdf, pdfResponse } from "@/lib/pdf";
-import { formatCurrency, formatDate, sentenceCase } from "@/lib/utils";
+import { calculateTicketFinancials, formatCurrency, formatDate, formatPercent, sentenceCase } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -17,23 +17,37 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const ticket = await db.ticket.findUnique({
     where: { id },
-    include: { customer: true, workspace: true, assignedUser: true },
+    include: { customer: true, workspace: true, assignedUser: true, quote: true },
   });
   if (!ticket) return exportErrorResponse(request, "Work order not found.", 404);
   if (!canExportWorkspaceRecord(user, ticket.workspaceId)) {
     return exportErrorResponse(request, "This work order belongs to a different workspace.", 403);
   }
 
+  const notes = parseLabeledNotes(ticket.notes);
+  const financials = calculateTicketFinancials({
+    actualHours: ticket.estimatedHours ?? ticket.actualHours,
+    laborRate: ticket.laborRate,
+    materialsCost: ticket.materialsCost,
+    shippingCost: ticket.shippingCost,
+    billedAmount: ticket.billedAmount,
+  });
+  const laborEstimate = (ticket.estimatedHours ?? ticket.actualHours ?? 0) * (ticket.laborRate ?? 0);
+  const estimatedCost = ticket.totalCost ?? financials.totalCost;
+  const estimatedProfit = ticket.profitLoss ?? financials.profitLoss;
+  const marginPercent = ticket.marginPercent ?? financials.marginPercent;
+
   const buffer = createProfessionalPdf({
     title: "Work Order",
     documentNumber: ticket.ticketNumber,
     status: sentenceCase(ticket.status),
-    customerBlock: [
+    customerBlock: compactLines([
       ticket.customer.company,
       ticket.customer.mainContact,
       ticket.customer.email,
-      ticket.customer.phone ?? "Phone not provided",
-    ],
+      ticket.customer.phone,
+      ticket.customer.address,
+    ]),
     meta: [
       ["Customer site", ticket.customer.address ?? "Site not provided"],
       ["Assigned", ticket.assignedUser?.name ?? ticket.assignedTo ?? "Unassigned"],
@@ -45,16 +59,32 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     sections: [
       {
         title: "Description of Work",
-        lines: [ticket.notes ?? "No notes provided for this job package."],
+        table: {
+          headers: ["Field", "Details"],
+          widths: [130, 386],
+          rows: compactRows([
+            ["Source quote", notes["source quote"] ?? ticket.quote?.quoteNumber],
+            ["Customer / contact", notes["customer/contact"] ?? `${ticket.customer.company} / ${ticket.customer.mainContact}`],
+            ["Service type", notes["service type"] ?? sentenceCase(ticket.type)],
+            ["Item / project", notes["item/project"]],
+            ["Customer notes", notes["customer notes"] ?? notes["structured summary"] ?? ticket.notes],
+            ["Location / site", notes["location/logistics"] ?? ticket.customer.address],
+            ["Requested timing", notes["requested turnaround"] ?? formatDate(ticket.dueDate)],
+            ["Service mode", notes["service mode"]],
+            ["Internal notes", notes["internal admin notes"]],
+          ]),
+        },
       },
       {
         title: "Labor / Materials",
         table: {
           headers: ["Category", "Description", "Estimate"],
-          widths: [120, 300, 96],
+          widths: [140, 280, 96],
           rows: [
-            ["Labor", "Technician labor and service execution", formatCurrency(ticket.quotedAmount)],
-            ["Materials", "Materials, parts, or outside services if required", "TBD"],
+            ["Labor estimate", "Estimated technician labor", formatCurrency(laborEstimate)],
+            ["Materials estimate", "Materials, parts, or outside services", formatCurrency(ticket.materialsCost)],
+            ["Shipping / other", "Shipping, travel, or other pass-through cost", formatCurrency(ticket.shippingCost)],
+            ["Total estimated cost", "Estimated internal cost", formatCurrency(estimatedCost)],
           ],
         },
       },
@@ -69,12 +99,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         ],
       },
       {
-        title: "Internal Notes",
-        lines: [
-          `Quoted: ${formatCurrency(ticket.quotedAmount)}`,
-          `Billed: ${formatCurrency(ticket.billedAmount)}`,
-          `Cost: ${formatCurrency(ticket.totalCost)}`,
-        ],
+        title: "Financial Summary",
+        table: {
+          headers: ["Metric", "Value"],
+          widths: [260, 256],
+          rows: [
+            ["Quoted amount", formatCurrency(ticket.quotedAmount)],
+            ["Billed amount", formatCurrency(ticket.billedAmount)],
+            ["Estimated cost", formatCurrency(estimatedCost)],
+            ["Estimated profit", formatCurrency(estimatedProfit)],
+            ["Margin", formatPercent(marginPercent)],
+          ],
+        },
       },
     ],
     terms: [
@@ -82,9 +118,31 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       "Customer-facing scope and pricing should match the approved quote or invoice.",
     ],
     signatureLabel: "Technician signature",
-    footer: documentFooter(ticket.workspace, "Internal work order"),
+    footer: documentFooter(ticket.workspace, "Generated by StanleySync"),
     logoUrl: ticket.workspace?.logoUrl,
   });
 
   return pdfResponse(`${ticket.ticketNumber}-work-order.pdf`, buffer);
+}
+
+function parseLabeledNotes(notes?: string | null) {
+  const parsed: Record<string, string> = {};
+  for (const block of (notes ?? "").split(/\n{2,}/)) {
+    const [label, ...rest] = block.split(":");
+    const value = rest.join(":").trim();
+    if (label && value) {
+      parsed[label.trim().toLowerCase()] = value;
+    }
+  }
+  return parsed;
+}
+
+function compactLines(values: Array<string | null | undefined>) {
+  return values.filter((value): value is string => Boolean(value?.trim()));
+}
+
+function compactRows(rows: Array<[string, string | null | undefined]>) {
+  return rows
+    .filter(([, value]) => Boolean(value?.trim()))
+    .map(([label, value]) => [label, value ?? ""]);
 }

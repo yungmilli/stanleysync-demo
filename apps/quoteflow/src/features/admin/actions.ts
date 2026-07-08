@@ -872,15 +872,24 @@ export async function createInvoiceFromCalibrationWorkOrderAction(formData: Form
 }
 
 export async function updateInvoiceStatusAction(formData: FormData) {
-  const { session } = await requireManagerSession();
+  const { session, user } = await requireManagerSession();
   const invoiceId = String(formData.get("invoiceId"));
   const status = String(formData.get("status")) as InvoiceStatus;
+  const dueDate = formData.has("dueDate") ? optionalDate(formData.get("dueDate")) : undefined;
+  const notes = formData.has("notes") ? optionalString(formData.get("notes")) : undefined;
+  const paymentUrl = formData.has("paymentUrl") ? optionalString(formData.get("paymentUrl")) : undefined;
+  const paymentProvider = formData.has("paymentProvider") ? optionalString(formData.get("paymentProvider")) : undefined;
+  const requestedPaymentStatus = formData.has("paymentStatus") ? optionalString(formData.get("paymentStatus")) : undefined;
+  const paymentInstructions = formData.has("paymentInstructions") ? optionalString(formData.get("paymentInstructions")) : undefined;
+  const tax = formData.has("tax") ? optionalNumber(formData.get("tax")) ?? 0 : undefined;
+  const discount = formData.has("discount") ? optionalNumber(formData.get("discount")) ?? 0 : undefined;
   const invoice = await db.invoice.findUnique({
     where: { id: invoiceId },
     include: { ticket: true, calibrationWorkOrder: true },
   });
 
   if (!invoice || !Object.values(InvoiceStatus).includes(status)) return;
+  if (user.role !== UserRole.SYSTEM_OWNER && invoice.workspaceId !== user.activeWorkspaceId) return;
 
   const nextPaymentStatus =
     status === InvoiceStatus.SENT
@@ -891,12 +900,23 @@ export async function updateInvoiceStatusAction(formData: FormData) {
           ? "PAID"
           : status === InvoiceStatus.VOID
             ? "VOIDED"
-            : invoice.paymentStatus;
+            : requestedPaymentStatus ?? invoice.paymentStatus;
+  const nextTax = tax ?? invoice.tax;
+  const nextDiscount = discount ?? invoice.discount;
+  const nextTotal = Math.max(0, invoice.subtotal + nextTax - nextDiscount);
 
   await db.invoice.update({
     where: { id: invoice.id },
     data: {
       status,
+      dueDate: dueDate === undefined ? invoice.dueDate : dueDate,
+      notes: notes === undefined ? invoice.notes : notes,
+      paymentUrl: paymentUrl === undefined ? invoice.paymentUrl : paymentUrl,
+      paymentProvider: paymentProvider === undefined ? invoice.paymentProvider : paymentProvider,
+      paymentInstructions: paymentInstructions === undefined ? invoice.paymentInstructions : paymentInstructions,
+      tax: nextTax,
+      discount: nextDiscount,
+      total: nextTotal,
       paymentStatus: nextPaymentStatus,
       sentAt: status === InvoiceStatus.SENT && !invoice.sentAt ? new Date() : invoice.sentAt,
       paidAt: status === InvoiceStatus.PAID && !invoice.paidAt ? new Date() : invoice.paidAt,
@@ -1005,7 +1025,7 @@ export async function updateInvoiceStatusAction(formData: FormData) {
 }
 
 export async function updateInvoicePaymentLinkAction(formData: FormData) {
-  const { session } = await requireManagerSession();
+  const { session, user } = await requireManagerSession();
   const invoiceId = String(formData.get("invoiceId"));
   const paymentUrl = optionalString(formData.get("paymentUrl"));
   const paymentProvider = optionalString(formData.get("paymentProvider")) ?? "Manual Link";
@@ -1014,6 +1034,7 @@ export async function updateInvoicePaymentLinkAction(formData: FormData) {
 
   const invoice = await db.invoice.findUnique({ where: { id: invoiceId } });
   if (!invoice) return;
+  if (user.role !== UserRole.SYSTEM_OWNER && invoice.workspaceId !== user.activeWorkspaceId) return;
 
   await db.invoice.update({
     where: { id: invoice.id },
