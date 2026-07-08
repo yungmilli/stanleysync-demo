@@ -32,10 +32,13 @@ export default async function QuoteDetailPage({
   const { id } = await params;
   const query = searchParams ? await searchParams : {};
   const workspaceState = await getWorkspaceSwitcherData(user.id);
-  const [quote, assignableUsers] = await Promise.all([
-    getQuoteDetail(id, workspaceState.activeWorkspace?.id),
+  const [quote, rawAssignableUsers] = await Promise.all([
+    getQuoteDetail(id, workspaceState.activeWorkspace?.id, user),
     getAssignableUsers(),
   ]);
+  const assignableUsers = user.role === UserRole.DEMO_USER
+    ? rawAssignableUsers.filter((member) => member.id === user.id)
+    : rawAssignableUsers;
 
   if (!quote) {
     notFound();

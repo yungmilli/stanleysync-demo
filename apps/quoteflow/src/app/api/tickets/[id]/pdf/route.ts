@@ -1,7 +1,7 @@
 import { getCurrentAppUser } from "@/lib/auth";
 import { companyContactBlock, documentFooter } from "@/lib/company-profile";
 import { db } from "@/lib/db";
-import { canExportForRole, canExportWorkspaceRecord, exportErrorResponse, ticketPdfExportRoles } from "@/lib/export-permissions";
+import { canExportForRole, canExportTicketRecord, exportErrorResponse, ticketPdfExportRoles } from "@/lib/export-permissions";
 import { createProfessionalPdf, pdfResponse } from "@/lib/pdf";
 import { calculateTicketFinancials, formatCurrency, formatDate, formatPercent, sentenceCase } from "@/lib/utils";
 
@@ -20,8 +20,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     include: { customer: true, workspace: true, assignedUser: true, quote: true },
   });
   if (!ticket) return exportErrorResponse(request, "Work order not found.", 404);
-  if (!canExportWorkspaceRecord(user, ticket.workspaceId)) {
-    return exportErrorResponse(request, "This work order belongs to a different workspace.", 403);
+  if (!canExportTicketRecord(user, ticket)) {
+    return exportErrorResponse(request, "This work order is not available to your account.", 403);
   }
 
   const notes = parseLabeledNotes(ticket.notes);

@@ -1,4 +1,4 @@
-import { BusinessType, type BusinessWorkspace } from "@prisma/client";
+import { BusinessType, UserRole, type BusinessWorkspace, type Prisma } from "@prisma/client";
 
 import { parseModules } from "@/features/workspaces/config";
 import { db } from "@/lib/db";
@@ -170,16 +170,54 @@ export async function getWorkspaceSwitcherData(userId: string) {
   };
 }
 
-export async function getWorkspaceDashboardData(workspaceId?: string | null) {
+type WorkspaceDashboardUser = {
+  id: string;
+  role: UserRole;
+};
+
+export async function getWorkspaceDashboardData(workspaceId?: string | null, user?: WorkspaceDashboardUser | null) {
   const where = workspaceId ? { workspaceId } : {};
+  const quoteWhere: Prisma.QuoteRequestWhereInput = {
+    AND: [
+      where,
+      user?.role === UserRole.DEMO_USER ? { assignedUserId: user.id } : {},
+    ],
+  };
+  const ticketWhere: Prisma.TicketWhereInput = {
+    AND: [
+      where,
+      user?.role === UserRole.DEMO_USER
+        ? {
+            OR: [
+              { assignedUserId: user.id },
+              { quote: { assignedUserId: user.id } },
+            ],
+          }
+        : {},
+    ],
+  };
+  const customerWhere: Prisma.CustomerWhereInput = {
+    AND: [
+      where,
+      user?.role === UserRole.DEMO_USER
+        ? {
+            OR: [
+              { quotes: { some: { assignedUserId: user.id } } },
+              { tickets: { some: { assignedUserId: user.id } } },
+              { tickets: { some: { quote: { assignedUserId: user.id } } } },
+            ],
+          }
+        : {},
+    ],
+  };
   const now = new Date();
   const dueSoon = new Date(now);
   dueSoon.setDate(dueSoon.getDate() + 30);
 
   const [workspaces, quotes, tickets, projects, calWorkOrders, assets, standards, certificates, widgetPreferences, customers, users, publicIntakeViews] = await Promise.all([
     safeWorkspaceQuery("workspaces", db.businessWorkspace.findMany({ orderBy: { businessName: "asc" } }), []),
-    safeWorkspaceQuery("quotes", db.quoteRequest.findMany({ where, include: { customer: true, ticket: true, workOrderDraft: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
-    safeWorkspaceQuery("tickets", db.ticket.findMany({ where, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
+    safeWorkspaceQuery("quotes", db.quoteRequest.findMany({ where: quoteWhere, include: { customer: true, ticket: true, workOrderDraft: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
+    safeWorkspaceQuery("tickets", db.ticket.findMany({ where: ticketWhere, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
     safeWorkspaceQuery("projects", db.websiteProject.findMany({ where, include: { client: true }, orderBy: { updatedAt: "desc" }, take: 5 }), []),
     safeWorkspaceQuery("calibration work orders", db.calibrationWorkOrder.findMany({ where, include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 8 }), []),
     safeWorkspaceQuery("assets", db.calAsset.findMany({ where, include: { customer: true }, orderBy: { dueDate: "asc" }, take: 8 }), []),
@@ -188,8 +226,13 @@ export async function getWorkspaceDashboardData(workspaceId?: string | null) {
     workspaceId
       ? safeWorkspaceQuery("widget preferences", db.dashboardWidgetPreference.findMany({ where: { workspaceId }, orderBy: [{ sortOrder: "asc" }, { title: "asc" }] }), [])
       : Promise.resolve([]),
-    safeWorkspaceQuery("customers", db.customer.findMany({ where, orderBy: { createdAt: "desc" }, take: 12 }), []),
-    safeWorkspaceQuery("users", db.user.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }), []),
+    safeWorkspaceQuery("customers", db.customer.findMany({ where: customerWhere, orderBy: { createdAt: "desc" }, take: 12 }), []),
+    safeWorkspaceQuery("users", db.user.findMany({
+      where: user?.role === UserRole.DEMO_USER
+        ? { id: user.id, isActive: true }
+        : { isActive: true },
+      orderBy: { name: "asc" },
+    }), []),
     safeWorkspaceQuery("public intake views", db.auditEvent.count({ where: { ...(workspaceId ? { workspaceId } : {}), action: "PUBLIC_INTAKE_VIEW" } }), 0),
   ]);
 

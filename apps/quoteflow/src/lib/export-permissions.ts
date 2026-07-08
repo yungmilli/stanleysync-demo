@@ -1,6 +1,7 @@
 import { UserRole, type User } from "@prisma/client";
 
-type ExportUser = Pick<User, "role" | "email" | "activeWorkspaceId"> | {
+type ExportUser = Pick<User, "id" | "role" | "email" | "activeWorkspaceId"> | {
+  id?: string | null;
   role: UserRole;
   email: string;
   activeWorkspaceId?: string | null;
@@ -43,6 +44,32 @@ export function canExportForRole(user: ExportUser | null | undefined, roles: Use
 export function canExportWorkspaceRecord(user: ExportUser, recordWorkspaceId?: string | null) {
   if (user.role !== UserRole.DEMO_USER) return true;
   return Boolean(recordWorkspaceId && user.activeWorkspaceId === recordWorkspaceId);
+}
+
+export function canExportQuoteRecord(user: ExportUser, record: { workspaceId?: string | null; assignedUserId?: string | null }) {
+  if (!canExportWorkspaceRecord(user, record.workspaceId)) return false;
+  if (user.role !== UserRole.DEMO_USER) return true;
+  return Boolean(user.id && record.assignedUserId === user.id);
+}
+
+export function canExportTicketRecord(user: ExportUser, record: { workspaceId?: string | null; assignedUserId?: string | null; quote?: { assignedUserId?: string | null } | null }) {
+  if (!canExportWorkspaceRecord(user, record.workspaceId)) return false;
+  if (user.role !== UserRole.DEMO_USER) return true;
+  return Boolean(user.id && (record.assignedUserId === user.id || record.quote?.assignedUserId === user.id));
+}
+
+export function canExportInvoiceRecord(user: ExportUser, record: {
+  workspaceId?: string | null;
+  quote?: { assignedUserId?: string | null } | null;
+  ticket?: { assignedUserId?: string | null; quote?: { assignedUserId?: string | null } | null } | null;
+}) {
+  if (!canExportWorkspaceRecord(user, record.workspaceId)) return false;
+  if (user.role !== UserRole.DEMO_USER) return true;
+  return Boolean(user.id && (
+    record.quote?.assignedUserId === user.id ||
+    record.ticket?.assignedUserId === user.id ||
+    record.ticket?.quote?.assignedUserId === user.id
+  ));
 }
 
 export function exportErrorResponse(request: Request, message: string, status: number) {

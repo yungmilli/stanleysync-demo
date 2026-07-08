@@ -27,7 +27,7 @@ export default async function AdminQuotesPage({
   const canSeeHandoffExports = user.role !== UserRole.DEMO_USER;
   const workspaceState = await getWorkspaceSwitcherData(user.id);
   const resolvedSearchParams = await searchParams;
-  const { quotes, filters } = await getQuotesList(resolvedSearchParams, workspaceState.activeWorkspace?.id);
+  const { quotes, filters } = await getQuotesList(resolvedSearchParams, workspaceState.activeWorkspace?.id, user);
 
   return (
     <div className="space-y-4">
@@ -82,7 +82,7 @@ export default async function AdminQuotesPage({
           <div className="p-5">
             <EmptyState
               title="No quotes matched the current filters"
-              body="Adjust the search or filters to see stored quote submissions."
+              body={user.role === UserRole.DEMO_USER ? "No demo quotes yet. Create a quote to start your own test workflow." : "Adjust the search or filters to see stored quote submissions."}
             />
           </div>
         ) : (

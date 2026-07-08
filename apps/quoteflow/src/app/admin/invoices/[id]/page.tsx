@@ -22,7 +22,7 @@ export default async function InvoiceDetailPage({
   const { user } = await requireQuoteAccess();
   const { id } = await params;
   const workspaceState = await getWorkspaceSwitcherData(user.id);
-  const invoice = await getInvoiceDetail(id, workspaceState.activeWorkspace?.id);
+  const invoice = await getInvoiceDetail(id, workspaceState.activeWorkspace?.id, user);
   const canManageInvoice = user.role === UserRole.SYSTEM_OWNER || user.role === UserRole.ADMIN || user.role === UserRole.MANAGER;
   const isLocked = invoice?.status === "PAID" || invoice?.status === "VOID";
   const canEditInvoice = canManageInvoice && (!isLocked || user.role === UserRole.SYSTEM_OWNER);

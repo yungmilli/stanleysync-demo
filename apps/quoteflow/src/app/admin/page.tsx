@@ -17,7 +17,7 @@ export default async function AdminDashboardPage() {
   const workspace = workspaceState.activeWorkspace;
   const modules = parseModules(workspace?.enabledModules);
   const visibleModules = user.role === UserRole.ADMIN ? modules : modules.filter((module) => module !== "CalOps");
-  const data = await getWorkspaceDashboardData(workspace?.id);
+  const data = await getWorkspaceDashboardData(workspace?.id, user);
   const preferences = data.widgetPreferences.length > 0
     ? data.widgetPreferences
     : DASHBOARD_WIDGET_CATALOG

@@ -1,7 +1,7 @@
 import { getCurrentAppUser } from "@/lib/auth";
 import { companyContactBlock, documentFooter, quoteTerms } from "@/lib/company-profile";
 import { db } from "@/lib/db";
-import { canExportForRole, canExportWorkspaceRecord, exportErrorResponse, quotePdfExportRoles } from "@/lib/export-permissions";
+import { canExportForRole, canExportQuoteRecord, exportErrorResponse, quotePdfExportRoles } from "@/lib/export-permissions";
 import { createProfessionalPdf, pdfResponse } from "@/lib/pdf";
 import { formatCurrency, formatDate, sentenceCase } from "@/lib/utils";
 
@@ -20,8 +20,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     include: { customer: true, workspace: true },
   });
   if (!quote) return exportErrorResponse(request, "Quote not found.", 404);
-  if (!canExportWorkspaceRecord(user, quote.workspaceId)) {
-    return exportErrorResponse(request, "This quote belongs to a different workspace.", 403);
+  if (!canExportQuoteRecord(user, quote)) {
+    return exportErrorResponse(request, "This quote is not available to your account.", 403);
   }
 
   const structuredSummary = asRecord(quote.structuredSummary);

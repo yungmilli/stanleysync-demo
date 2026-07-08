@@ -13,6 +13,11 @@ import { db } from "@/lib/db";
 import { calculateTicketFinancials } from "@/lib/utils";
 
 type SearchValue = string | string[] | undefined;
+type OpsUserScope = {
+  id: string;
+  role: UserRole;
+  activeWorkspaceId?: string | null;
+};
 const CLOSED_TICKET_STATUSES: TicketStatus[] = [TicketStatus.CLOSED, TicketStatus.INVOICED];
 const REVIEW_QUOTE_STATUSES: QuoteStatus[] = [
   QuoteStatus.NEW,
@@ -38,6 +43,47 @@ async function safeOpsQuery<T>(label: string, query: Promise<T>, fallback: T) {
 
 function persistedWorkspaceId(workspaceId?: string | null) {
   return workspaceId?.startsWith("fallback-") ? undefined : workspaceId ?? undefined;
+}
+
+function demoQuoteScope(user?: OpsUserScope | null): Prisma.QuoteRequestWhereInput {
+  return user?.role === UserRole.DEMO_USER ? { assignedUserId: user.id } : {};
+}
+
+function demoTicketScope(user?: OpsUserScope | null): Prisma.TicketWhereInput {
+  return user?.role === UserRole.DEMO_USER
+    ? {
+        OR: [
+          { assignedUserId: user.id },
+          { quote: { assignedUserId: user.id } },
+        ],
+      }
+    : {};
+}
+
+function demoInvoiceScope(user?: OpsUserScope | null): Prisma.InvoiceWhereInput {
+  return user?.role === UserRole.DEMO_USER
+    ? {
+        OR: [
+          { quote: { assignedUserId: user.id } },
+          { ticket: { assignedUserId: user.id } },
+          { ticket: { quote: { assignedUserId: user.id } } },
+        ],
+      }
+    : {};
+}
+
+function demoCustomerScope(user?: OpsUserScope | null): Prisma.CustomerWhereInput {
+  return user?.role === UserRole.DEMO_USER
+    ? {
+        OR: [
+          { quotes: { some: { assignedUserId: user.id } } },
+          { tickets: { some: { assignedUserId: user.id } } },
+          { tickets: { some: { quote: { assignedUserId: user.id } } } },
+          { invoices: { some: { quote: { assignedUserId: user.id } } } },
+          { invoices: { some: { ticket: { assignedUserId: user.id } } } },
+        ],
+      }
+    : {};
 }
 
 export function parseListParams(searchParams: Record<string, SearchValue>) {
@@ -213,7 +259,7 @@ export async function getDashboardData() {
   };
 }
 
-export async function getQuotesList(searchParams: Record<string, SearchValue>, workspaceId?: string | null) {
+export async function getQuotesList(searchParams: Record<string, SearchValue>, workspaceId?: string | null, user?: OpsUserScope | null) {
   const filters = parseListParams(searchParams);
   const scopedWorkspaceId = persistedWorkspaceId(workspaceId);
   const where: Prisma.QuoteRequestWhereInput = {
@@ -233,6 +279,7 @@ export async function getQuotesList(searchParams: Record<string, SearchValue>, w
       filters.priority ? { priority: filters.priority as Priority } : {},
       filters.dateRange ? { createdAt: getDateRangeFilter(filters.dateRange) } : {},
       scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {},
+      demoQuoteScope(user),
     ],
   };
 
@@ -258,10 +305,10 @@ export async function getQuotesList(searchParams: Record<string, SearchValue>, w
   return { quotes, filters };
 }
 
-export async function getQuoteDetail(id: string, workspaceId?: string | null) {
+export async function getQuoteDetail(id: string, workspaceId?: string | null, user?: OpsUserScope | null) {
   const scopedWorkspaceId = persistedWorkspaceId(workspaceId);
   return safeOpsQuery("quote detail", db.quoteRequest.findFirst({
-    where: { id, ...(scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {}) },
+    where: { id, ...(scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {}), ...demoQuoteScope(user) },
     include: {
       customer: true,
       assignedUser: true,
@@ -287,7 +334,7 @@ export async function getQuoteDetail(id: string, workspaceId?: string | null) {
   }), null);
 }
 
-export async function getTicketsList(searchParams: Record<string, SearchValue>, workspaceId?: string | null) {
+export async function getTicketsList(searchParams: Record<string, SearchValue>, workspaceId?: string | null, user?: OpsUserScope | null) {
   const filters = parseListParams(searchParams);
   const scopedWorkspaceId = persistedWorkspaceId(workspaceId);
   const where: Prisma.TicketWhereInput = {
@@ -307,6 +354,7 @@ export async function getTicketsList(searchParams: Record<string, SearchValue>, 
         ? { assignedTo: { contains: filters.assignedTo, mode: "insensitive" } }
         : {},
       scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {},
+      demoTicketScope(user),
     ],
   };
 
@@ -339,10 +387,10 @@ export async function getTicketsList(searchParams: Record<string, SearchValue>, 
   return { tickets, byStatus, filters };
 }
 
-export async function getTicketDetail(id: string, workspaceId?: string | null) {
+export async function getTicketDetail(id: string, workspaceId?: string | null, user?: OpsUserScope | null) {
   const scopedWorkspaceId = persistedWorkspaceId(workspaceId);
   return safeOpsQuery("ticket detail", db.ticket.findFirst({
-    where: { id, ...(scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {}) },
+    where: { id, ...(scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {}), ...demoTicketScope(user) },
     include: {
       customer: true,
       assignedUser: true,
@@ -360,29 +408,36 @@ export async function getTicketDetail(id: string, workspaceId?: string | null) {
   }), null);
 }
 
-export async function getCustomersList(searchParams: Record<string, SearchValue>, workspaceId?: string | null) {
+export async function getCustomersList(searchParams: Record<string, SearchValue>, workspaceId?: string | null, user?: OpsUserScope | null) {
   const query = getSingleValue(searchParams.query)?.trim() ?? "";
   const scopedWorkspaceId = persistedWorkspaceId(workspaceId);
+  const nestedQuoteScope: Prisma.QuoteRequestWhereInput = user?.role === UserRole.DEMO_USER ? { assignedUserId: user.id } : {};
+  const nestedTicketScope: Prisma.TicketWhereInput = demoTicketScope(user);
   return safeOpsQuery("customers list", db.customer.findMany({
     where: {
-      ...(scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {}),
-      ...(query
-        ? {
-            OR: [
-              { company: { contains: query, mode: "insensitive" } },
-              { mainContact: { contains: query, mode: "insensitive" } },
-              { email: { contains: query, mode: "insensitive" } },
-            ],
-          }
-        : {}),
+      AND: [
+        scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {},
+        query
+          ? {
+              OR: [
+                { company: { contains: query, mode: "insensitive" } },
+                { mainContact: { contains: query, mode: "insensitive" } },
+                { email: { contains: query, mode: "insensitive" } },
+              ],
+            }
+          : {},
+        demoCustomerScope(user),
+      ],
     },
     orderBy: { updatedAt: "desc" },
     include: {
       quotes: {
+        where: nestedQuoteScope,
         orderBy: { createdAt: "desc" },
         take: 4,
       },
       tickets: {
+        where: nestedTicketScope,
         orderBy: { updatedAt: "desc" },
         take: 4,
       },
@@ -464,16 +519,25 @@ export async function getFinancialOverview() {
   };
 }
 
-export async function getInvoicesList(workspaceId?: string | null) {
+export async function getInvoicesList(workspaceId?: string | null, user?: OpsUserScope | null) {
   const scopedWorkspaceId = persistedWorkspaceId(workspaceId);
   return safeOpsQuery("invoices list", db.invoice.findMany({
-    where: scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : undefined,
+    where: {
+      AND: [
+        scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {},
+        demoInvoiceScope(user),
+      ],
+    },
     orderBy: { updatedAt: "desc" },
     include: {
       customer: true,
       workspace: true,
       quote: true,
-      ticket: true,
+      ticket: {
+        include: {
+          quote: true,
+        },
+      },
       calibrationWorkOrder: true,
       lineItems: {
         orderBy: { sortOrder: "asc" },
@@ -482,15 +546,19 @@ export async function getInvoicesList(workspaceId?: string | null) {
   }), []);
 }
 
-export async function getInvoiceDetail(id: string, workspaceId?: string | null) {
+export async function getInvoiceDetail(id: string, workspaceId?: string | null, user?: OpsUserScope | null) {
   const scopedWorkspaceId = persistedWorkspaceId(workspaceId);
   return safeOpsQuery("invoice detail", db.invoice.findFirst({
-    where: { id, ...(scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {}) },
+    where: { id, ...(scopedWorkspaceId ? { workspaceId: scopedWorkspaceId } : {}), ...demoInvoiceScope(user) },
     include: {
       customer: true,
       workspace: true,
       quote: true,
-      ticket: true,
+      ticket: {
+        include: {
+          quote: true,
+        },
+      },
       calibrationWorkOrder: true,
       lineItems: {
         orderBy: { sortOrder: "asc" },

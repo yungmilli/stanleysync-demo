@@ -144,10 +144,30 @@ async function getAssignedUserDetails(userId: string | null) {
   };
 }
 
+function canAccessWorkspaceRecord(user: { role: UserRole; activeWorkspaceId?: string | null }, workspaceId?: string | null) {
+  if (user.role === UserRole.SYSTEM_OWNER) return true;
+  return Boolean(workspaceId && user.activeWorkspaceId === workspaceId);
+}
+
+function canAccessQuoteRecord(user: { id: string; role: UserRole; activeWorkspaceId?: string | null }, quote: { workspaceId?: string | null; assignedUserId?: string | null }) {
+  if (!canAccessWorkspaceRecord(user, quote.workspaceId)) return false;
+  if (user.role !== UserRole.DEMO_USER) return true;
+  return quote.assignedUserId === user.id;
+}
+
+function canAccessTicketRecord(
+  user: { id: string; role: UserRole; activeWorkspaceId?: string | null },
+  ticket: { workspaceId?: string | null; assignedUserId?: string | null; quote?: { assignedUserId?: string | null } | null },
+) {
+  if (!canAccessWorkspaceRecord(user, ticket.workspaceId)) return false;
+  if (user.role !== UserRole.DEMO_USER) return true;
+  return ticket.assignedUserId === user.id || ticket.quote?.assignedUserId === user.id;
+}
+
 export async function updateQuoteAction(formData: FormData) {
   const { session, user } = await requireQuoteAccess();
   const quoteId = String(formData.get("quoteId"));
-  const assignedUserId = optionalString(formData.get("assignedUserId"));
+  const assignedUserId = user.role === UserRole.DEMO_USER ? user.id : optionalString(formData.get("assignedUserId"));
   const adminNotes = optionalString(formData.get("adminNotes"));
   const customerVisibleNotes = optionalString(formData.get("customerVisibleNotes"));
   const requestedTurnaround = optionalString(formData.get("requestedTurnaround"));
@@ -164,6 +184,10 @@ export async function updateQuoteAction(formData: FormData) {
   });
 
   if (!existing) {
+    return;
+  }
+
+  if (!canAccessQuoteRecord(user, existing)) {
     return;
   }
 
@@ -257,7 +281,7 @@ export async function updateQuoteAction(formData: FormData) {
 }
 
 export async function convertQuoteToTicketAction(formData: FormData) {
-  const { session } = await requireTicketAccess();
+  const { session, user } = await requireTicketAccess();
   const quoteId = String(formData.get("quoteId"));
   const quote = await db.quoteRequest.findUnique({
     where: { id: quoteId },
@@ -266,6 +290,10 @@ export async function convertQuoteToTicketAction(formData: FormData) {
 
   if (!quote) {
     redirectWithConversionError(quoteId, "Quote was not found. Refresh the quote list and try again.");
+  }
+
+  if (!canAccessQuoteRecord(user, quote)) {
+    redirectWithConversionError(quote.id, "This quote is not available to your account.");
   }
 
   if (quote.ticket) {
@@ -417,7 +445,7 @@ export async function convertQuoteToTicketAction(formData: FormData) {
 }
 
 export async function addQuoteInternalNoteAction(formData: FormData) {
-  const { session } = await requireQuoteAccess();
+  const { session, user } = await requireQuoteAccess();
   const quoteId = String(formData.get("quoteId"));
   const body = optionalString(formData.get("body"));
 
@@ -430,6 +458,10 @@ export async function addQuoteInternalNoteAction(formData: FormData) {
   });
 
   if (!quote) {
+    return;
+  }
+
+  if (!canAccessQuoteRecord(user, quote)) {
     return;
   }
 
@@ -734,7 +766,7 @@ export async function createInvoiceFromQuoteAction(formData: FormData) {
 }
 
 export async function createInvoiceFromTicketAction(formData: FormData) {
-  const { session } = await requireTicketAccess();
+  const { session, user } = await requireTicketAccess();
   const ticketId = String(formData.get("ticketId"));
   const ticket = await db.ticket.findUnique({
     where: { id: ticketId },
@@ -742,6 +774,7 @@ export async function createInvoiceFromTicketAction(formData: FormData) {
   });
 
   if (!ticket) return;
+  if (!canAccessTicketRecord(user, ticket)) return;
   if (ticket.invoices[0]) redirect(`/admin/invoices/${ticket.invoices[0].id}`);
 
   const amount = ticket.billedAmount ?? ticket.quotedAmount ?? ticket.quote?.quotedAmount ?? 0;
@@ -1219,7 +1252,7 @@ export async function restoreWorkflowDefaultsAction(formData: FormData) {
 
 
 export async function sendQuoteEmailAction(formData: FormData) {
-  const { session } = await requireQuoteAccess();
+  const { session, user } = await requireQuoteAccess();
   const quoteId = String(formData.get("quoteId"));
   const subject = String(formData.get("subject") ?? "");
   const message = String(formData.get("message") ?? "");
@@ -1229,6 +1262,7 @@ export async function sendQuoteEmailAction(formData: FormData) {
   });
 
   if (!quote || !subject.trim() || !message.trim()) return;
+  if (!canAccessQuoteRecord(user, quote)) return;
 
   await sendCustomerUpdateEmail({
     to: quote.customer.email,
@@ -1254,9 +1288,9 @@ export async function sendQuoteEmailAction(formData: FormData) {
 }
 
 export async function updateTicketAction(formData: FormData) {
-  const { session } = await requireTicketAccess();
+  const { session, user } = await requireTicketAccess();
   const ticketId = String(formData.get("ticketId"));
-  const assignedUserId = optionalString(formData.get("assignedUserId"));
+  const assignedUserId = user.role === UserRole.DEMO_USER ? user.id : optionalString(formData.get("assignedUserId"));
   const dueDate = optionalDate(formData.get("dueDate"));
   const estimatedHours = optionalNumber(formData.get("estimatedHours"));
   const actualHours = optionalNumber(formData.get("actualHours"));
@@ -1275,6 +1309,7 @@ export async function updateTicketAction(formData: FormData) {
   });
 
   if (!existing) return;
+  if (!canAccessTicketRecord(user, existing)) return;
 
   const status = enumValue(TicketStatus, formData.get("status"), existing.status);
   const priority = enumValue(Priority, formData.get("priority"), existing.priority);
@@ -1913,6 +1948,7 @@ export async function addTicketCommentAction(formData: FormData) {
 
   const ticket = await db.ticket.findUnique({
     where: { id: ticketId },
+    include: { quote: true },
   });
 
   if (!ticket) {
@@ -1920,9 +1956,7 @@ export async function addTicketCommentAction(formData: FormData) {
   }
 
   const canComment =
-    user.role === UserRole.ADMIN ||
-    user.role === UserRole.MANAGER ||
-    user.role === UserRole.SYSTEM_OWNER ||
+    canAccessTicketRecord(user, ticket) ||
     ticket.assignedUserId === user.id;
 
   if (!canComment) {

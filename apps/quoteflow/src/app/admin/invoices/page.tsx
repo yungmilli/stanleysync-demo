@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { UserRole } from "@prisma/client";
 
 import { Breadcrumbs, DetailCard, EmptyState, StatusBadge } from "@/components/admin/ops-ui";
 import { requireQuoteAccess } from "@/features/admin/guards";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function InvoicesPage() {
   const { user } = await requireQuoteAccess();
   const workspaceState = await getWorkspaceSwitcherData(user.id);
-  const invoices = await getInvoicesList(workspaceState.activeWorkspace?.id);
+  const invoices = await getInvoicesList(workspaceState.activeWorkspace?.id, user);
   const totals = invoices.reduce(
     (accumulator, invoice) => {
       accumulator.open += invoice.status === "PAID" || invoice.status === "VOID" ? 0 : invoice.total;
@@ -33,7 +34,7 @@ export default async function InvoicesPage() {
         {invoices.length === 0 ? (
           <EmptyState
             title="No invoices yet"
-            body="Finalize a quote or complete a job, then create an invoice from the source record."
+            body={user.role === UserRole.DEMO_USER ? "No demo invoices yet. Create an invoice from one of your own jobs to see it here." : "Finalize a quote or complete a job, then create an invoice from the source record."}
           />
         ) : (
           <div className="overflow-hidden rounded-[1rem] border border-[#12212c]/8">

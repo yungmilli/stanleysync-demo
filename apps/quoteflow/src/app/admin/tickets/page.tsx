@@ -17,7 +17,7 @@ export default async function TicketsPage({
   const { user } = await requireRoles([UserRole.ADMIN, UserRole.MANAGER, UserRole.DEMO_USER]);
   const workspaceState = await getWorkspaceSwitcherData(user.id);
   const resolvedSearchParams = await searchParams;
-  const { tickets, byStatus, filters } = await getTicketsList(resolvedSearchParams, workspaceState.activeWorkspace?.id);
+  const { tickets, byStatus, filters } = await getTicketsList(resolvedSearchParams, workspaceState.activeWorkspace?.id, user);
 
   return (
     <div className="space-y-4">
@@ -63,7 +63,7 @@ export default async function TicketsPage({
       {tickets.length === 0 ? (
         <EmptyState
           title="No tickets matched the current filters"
-          body="Convert approved quotes into work orders or broaden the filters."
+          body={user.role === UserRole.DEMO_USER ? "No demo jobs yet. Convert one of your own accepted quotes to create a job." : "Convert approved quotes into work orders or broaden the filters."}
         />
       ) : filters.view === "kanban" ? (
         <div className="grid gap-4 xl:grid-cols-4">

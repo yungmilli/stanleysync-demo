@@ -1,9 +1,10 @@
 import { UserRole } from "@prisma/client";
+import Link from "next/link";
 
 import { ConfirmSubmitButton } from "@/components/admin/confirm-submit-button";
 import { DetailCard, EmptyState, StatusBadge } from "@/components/admin/ops-ui";
 import { createTeamMemberAction, updateTeamMemberAction, updateTeamMemberProfileAction } from "@/features/admin/actions";
-import { requireUserManagementSession } from "@/features/admin/guards";
+import { requireAuthenticatedUser } from "@/features/admin/guards";
 import { db } from "@/lib/db";
 import { formatDateTime } from "@/lib/utils";
 
@@ -28,11 +29,28 @@ type UsersPageProps = {
 };
 
 export default async function UsersAndRolesPage({ searchParams }: UsersPageProps) {
-  const { user } = await requireUserManagementSession();
+  const { user } = await requireAuthenticatedUser();
   const params = await searchParams;
   const isSystemOwner = user.role === UserRole.SYSTEM_OWNER;
+  const canManageUsers = isSystemOwner || user.role === UserRole.ADMIN;
   const roleOptions = isSystemOwner ? allRoleOptions : workspaceAdminRoleOptions;
   const saved = params?.userSaved === "1";
+
+  if (!canManageUsers) {
+    return (
+      <div className="space-y-4">
+        <DetailCard title="Access denied">
+          <p className="text-sm leading-6 text-[#64707a]">
+            Users & Roles is limited to System Owner and Admin accounts. Demo users cannot view users,
+            edit roles, reset passwords, or change workspace permissions.
+          </p>
+          <Link href="/admin" className="mt-4 inline-flex rounded-full bg-[#12212c] px-4 py-2 text-sm font-medium text-white">
+            Back to Dashboard
+          </Link>
+        </DetailCard>
+      </div>
+    );
+  }
 
   const [users, workspaces] = await Promise.all([
     db.user.findMany({

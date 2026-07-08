@@ -1,7 +1,7 @@
 import { getInvoiceDetail } from "@/features/ops/queries";
 import { getCurrentAppUser } from "@/lib/auth";
 import { companyContactBlock, documentFooter, invoiceTerms } from "@/lib/company-profile";
-import { canExportForRole, canExportWorkspaceRecord, exportErrorResponse, invoicePdfExportRoles } from "@/lib/export-permissions";
+import { canExportForRole, canExportInvoiceRecord, exportErrorResponse, invoicePdfExportRoles } from "@/lib/export-permissions";
 import { createProfessionalPdf, pdfResponse } from "@/lib/pdf";
 import { formatCurrency, formatDate, sentenceCase } from "@/lib/utils";
 
@@ -16,14 +16,14 @@ export async function GET(
   }
 
   const { id } = await params;
-  const invoice = await getInvoiceDetail(id);
+  const invoice = await getInvoiceDetail(id, undefined, user);
 
   if (!invoice) {
     return exportErrorResponse(request, "Invoice not found.", 404);
   }
 
-  if (!canExportWorkspaceRecord(user, invoice.workspaceId)) {
-    return exportErrorResponse(request, "This invoice belongs to a different workspace.", 403);
+  if (!canExportInvoiceRecord(user, invoice)) {
+    return exportErrorResponse(request, "This invoice is not available to your account.", 403);
   }
   const paymentDetails = parsePaymentDetails(invoice.paymentInstructions);
   const isPaid = invoice.status === "PAID";

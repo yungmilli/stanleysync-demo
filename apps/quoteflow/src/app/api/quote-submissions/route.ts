@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { quoteAnswersSchema } from "@/features/quotes/schema";
 import { persistQuoteRequest } from "@/features/quotes/submit";
 import type { ConversationMessage, QuoteAnswers } from "@/features/quotes/types";
+import { getCurrentAppUser } from "@/lib/auth";
 
 const FIELD_LABELS: Record<string, string> = {
   serviceType: "service type",
@@ -46,10 +47,13 @@ export async function POST(request: Request) {
       .getAll("files")
       .filter((entry): entry is File => entry instanceof File);
 
+    const appUser = await getCurrentAppUser().catch(() => null);
     const result = await persistQuoteRequest({
       answers: parsed.answers,
       transcript: parsed.transcript,
       files,
+      assignedUserId: appUser?.id === "env-admin" ? undefined : appUser?.id,
+      assignedTo: appUser?.id === "env-admin" ? undefined : appUser?.name,
     });
 
     return NextResponse.json({

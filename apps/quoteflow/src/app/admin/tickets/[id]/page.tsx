@@ -22,7 +22,10 @@ export default async function TicketDetailPage({
   const { id } = await params;
   const query = searchParams ? await searchParams : {};
   const workspaceState = await getWorkspaceSwitcherData(user.id);
-  const [ticket, assignableUsers] = await Promise.all([getTicketDetail(id, workspaceState.activeWorkspace?.id), getAssignableUsers()]);
+  const [ticket, rawAssignableUsers] = await Promise.all([getTicketDetail(id, workspaceState.activeWorkspace?.id, user), getAssignableUsers()]);
+  const assignableUsers = user.role === UserRole.DEMO_USER
+    ? rawAssignableUsers.filter((member) => member.id === user.id)
+    : rawAssignableUsers;
 
   if (!ticket) notFound();
 

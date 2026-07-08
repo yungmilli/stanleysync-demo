@@ -14,7 +14,7 @@ export default async function CustomersPage({
 }) {
   const { user } = await requireRoles([UserRole.ADMIN, UserRole.MANAGER, UserRole.SALES, UserRole.DEMO_USER]);
   const workspaceState = await getWorkspaceSwitcherData(user.id);
-  const customers = await getCustomersList(await searchParams, workspaceState.activeWorkspace?.id);
+  const customers = await getCustomersList(await searchParams, workspaceState.activeWorkspace?.id, user);
 
   return (
     <div className="space-y-4">
@@ -24,7 +24,10 @@ export default async function CustomersPage({
       />
 
       {customers.length === 0 ? (
-        <EmptyState title="No customers yet" body="Customer records are created when quote requests are submitted." />
+        <EmptyState
+          title="No customers yet"
+          body={user.role === UserRole.DEMO_USER ? "Your demo customer list starts blank. Submit a quote to create your first customer record." : "Customer records are created when quote requests are submitted."}
+        />
       ) : (
         <div className="grid gap-4 xl:grid-cols-2">
           {customers.map((customer) => (

@@ -108,10 +108,14 @@ export async function persistQuoteRequest({
   answers,
   transcript,
   files,
+  assignedUserId,
+  assignedTo,
 }: {
   answers: QuoteAnswers;
   transcript: ConversationMessage[];
   files: File[];
+  assignedUserId?: string | null;
+  assignedTo?: string | null;
 }) {
   const validated = quoteAnswersSchema.parse({
     ...answers,
@@ -178,6 +182,8 @@ export async function persistQuoteRequest({
       quoteNumber,
       workspaceId: workspace?.id,
       customerId: customer.id,
+      assignedUserId,
+      assignedTo,
       serviceType: toServiceType(validated.serviceType),
       status: QuoteStatus.NEW,
       priority: toPriority(analysis.suggestedPriority),
