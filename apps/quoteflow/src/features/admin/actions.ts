@@ -729,7 +729,9 @@ export async function createInvoiceFromQuoteAction(formData: FormData) {
       dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       customerVisibleNotes: quote.issueDescription ?? quote.aiSummary,
       internalNotes: quote.adminNotes,
-      paymentTerms: "Net 30",
+      billingAddress: quote.customer.billingAddress ?? quote.customer.address,
+      shippingAddress: quote.customer.shippingAddress,
+      paymentTerms: quote.customer.paymentTerms ?? "Net 30",
       paymentInstructions: "Payment due within 30 days. Confirm ACH, card, or check details before sending.",
       lineItems: {
         create: [
@@ -797,7 +799,9 @@ export async function createInvoiceFromTicketAction(formData: FormData) {
       dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       customerVisibleNotes: ticket.notes,
       internalNotes: ticket.quote?.adminNotes,
-      paymentTerms: "Net 30",
+      billingAddress: ticket.customer.billingAddress ?? ticket.customer.address,
+      shippingAddress: ticket.customer.shippingAddress,
+      paymentTerms: ticket.customer.paymentTerms ?? "Net 30",
       paymentInstructions: "Payment due within 30 days. Confirm ACH, card, or check details before sending.",
       lineItems: {
         create: [
@@ -868,7 +872,9 @@ export async function createInvoiceFromCalibrationWorkOrderAction(formData: Form
       total: totals.total,
       dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       customerVisibleNotes: workOrder.certificateNotes ?? workOrder.intakeNotes,
-      paymentTerms: "Net 30",
+      billingAddress: workOrder.customer.billingAddress ?? workOrder.customer.address,
+      shippingAddress: workOrder.customer.shippingAddress,
+      paymentTerms: workOrder.customer.paymentTerms ?? "Net 30",
       paymentInstructions: "Payment due within 30 days. Confirm ACH, card, or check details before sending.",
       lineItems: {
         create: [
@@ -1211,6 +1217,67 @@ export async function markInvoicePaidAction(formData: FormData) {
   await updateInvoiceStatusAction(formData);
 }
 
+
+export async function updateCustomerRecordAction(formData: FormData) {
+  const { session, user } = await requireQuoteAccess();
+  const customerId = String(formData.get("customerId") ?? "");
+  const customer = await db.customer.findUnique({
+    where: { id: customerId },
+    include: {
+      quotes: { select: { assignedUserId: true }, take: 25 },
+      tickets: { select: { assignedUserId: true }, take: 25 },
+    },
+  });
+
+  if (!customer) return;
+  const workspaceAllowed = user.role === UserRole.SYSTEM_OWNER || customer.workspaceId === user.activeWorkspaceId;
+  const demoAllowed = user.role !== UserRole.DEMO_USER || customer.quotes.some((quote) => quote.assignedUserId === user.id) || customer.tickets.some((ticket) => ticket.assignedUserId === user.id);
+  if (!workspaceAllowed || !demoAllowed) return;
+
+  const company = optionalString(formData.get("company")) ?? customer.company;
+  const mainContact = optionalString(formData.get("mainContact")) ?? customer.mainContact;
+  const email = optionalString(formData.get("email")) ?? customer.email;
+  const tags = optionalString(formData.get("tags"));
+
+  await db.customer.update({
+    where: { id: customer.id },
+    data: {
+      company,
+      mainContact,
+      email,
+      phone: optionalString(formData.get("phone")),
+      address: optionalString(formData.get("address")),
+      billingEmail: optionalString(formData.get("billingEmail")),
+      billingPhone: optionalString(formData.get("billingPhone")),
+      billingAddress: optionalString(formData.get("billingAddress")),
+      shippingAddress: optionalString(formData.get("shippingAddress")),
+      industry: optionalString(formData.get("industry")),
+      accountStatus: optionalString(formData.get("accountStatus")) ?? "ACTIVE",
+      paymentTerms: optionalString(formData.get("paymentTerms")),
+      preferredContactMethod: optionalString(formData.get("preferredContactMethod")),
+      taxExempt: formData.get("taxExempt") === "on",
+      tags: tags ? tags.split(",").map((tag) => tag.trim()).filter(Boolean) : undefined,
+      notes: optionalString(formData.get("notes")),
+      internalNotes: optionalString(formData.get("internalNotes")),
+    },
+  });
+
+  await db.auditEvent.create({
+    data: {
+      workspaceId: customer.workspaceId,
+      actorUserId: user.id,
+      actorEmail: session.user.email ?? user.email,
+      action: "customer.record.updated",
+      entityType: "Customer",
+      entityId: customer.id,
+      summary: `${company} customer record updated.`,
+    },
+  });
+
+  revalidatePath("/admin/customers");
+  revalidatePath("/admin/quotes");
+  revalidatePath("/admin/invoices");
+}
 const defaultWorkflowStages: Record<WorkflowModule, Array<{ key: string; label: string }>> = {
   QUOTEFLOW: [
     { key: "NEW", label: "New" },

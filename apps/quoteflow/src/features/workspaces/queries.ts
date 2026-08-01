@@ -295,7 +295,7 @@ export async function getWorkspaceSetupData() {
 }
 
 export async function getSettingsData(workspaceId?: string | null) {
-  const [workspace, notifications, auditEvents, workflowStages] = await Promise.all([
+  const [workspace, notifications, auditEvents, workflowStages, products] = await Promise.all([
     workspaceId
       ? safeWorkspaceQuery("settings workspace", db.businessWorkspace.findUnique({ where: { id: workspaceId } }), null)
       : Promise.resolve(null),
@@ -313,7 +313,12 @@ export async function getSettingsData(workspaceId?: string | null) {
       where: workspaceId ? { workspaceId } : {},
       orderBy: [{ module: "asc" }, { sortOrder: "asc" }],
     }), []),
+    safeWorkspaceQuery("settings products", db.productService.findMany({
+      where: workspaceId ? { workspaceId } : {},
+      orderBy: [{ isActive: "desc" }, { updatedAt: "desc" }],
+      take: 20,
+    }), []),
   ]);
 
-  return { workspace, notifications, auditEvents, workflowStages };
+  return { workspace, notifications, auditEvents, workflowStages, products };
 }

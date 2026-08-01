@@ -1,21 +1,22 @@
 import Link from "next/link";
 import { UserRole } from "@prisma/client";
 
+import { SafeEditForm } from "@/components/admin/safe-edit-form";
 import { AdminSection, DetailCard, StatusBadge } from "@/components/admin/ops-ui";
 import { restoreWorkflowDefaultsAction } from "@/features/admin/actions";
 import { requireAuthenticatedUser } from "@/features/admin/guards";
-import { saveWorkspaceBrandingAction } from "@/features/workspaces/actions";
+import { createProductServiceAction, saveWorkspaceBrandingAction } from "@/features/workspaces/actions";
 import { businessTypeLabel } from "@/features/workspaces/config";
 import { getSettingsData, getWorkspaceSwitcherData } from "@/features/workspaces/queries";
 import { env } from "@/lib/env";
-import { formatDateTime, sentenceCase } from "@/lib/utils";
+import { formatCurrency, formatDateTime, sentenceCase } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const { user } = await requireAuthenticatedUser();
   const workspaceState = await getWorkspaceSwitcherData(user.id);
-  const { workspace, notifications, auditEvents, workflowStages } = await getSettingsData(workspaceState.activeWorkspace?.id);
+  const { workspace, notifications, auditEvents, workflowStages, products } = await getSettingsData(workspaceState.activeWorkspace?.id);
   const canManageSettings = user.role === UserRole.SYSTEM_OWNER || user.role === UserRole.ADMIN || user.role === UserRole.MANAGER;
   const canManageUsers = user.role === UserRole.SYSTEM_OWNER || user.role === UserRole.ADMIN;
   const visibleWorkflowModules = user.role === UserRole.ADMIN
@@ -71,7 +72,7 @@ export default async function SettingsPage() {
       {workspace ? (
         <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
           <DetailCard title="Business profile and branding">
-            <form action={saveWorkspaceBrandingAction} className="grid gap-3">
+            <SafeEditForm action={saveWorkspaceBrandingAction} editLabel="Edit business profile" saveLabel="Save business profile" startLocked lockedMessage="Open edit mode before changing business profile, logo, colors, or PDF terms.">
               <input type="hidden" name="workspaceId" value={workspace.id} />
               <label className="grid gap-1.5 text-sm">
                 Business name
@@ -129,10 +130,8 @@ export default async function SettingsPage() {
                 Invoice terms
                 <textarea name="invoiceTerms" defaultValue={workspace.invoiceTerms ?? ""} rows={3} className="rounded-[0.78rem] border border-[#12212c]/10 bg-white/70 px-3 py-2" />
               </label>
-              {canManageSettings ? (
-                <button type="submit" className="w-fit rounded-full bg-[#12212c] px-4 py-2 text-sm font-medium text-white">Save branding</button>
-              ) : null}
-            </form>
+
+            </SafeEditForm>
           </DetailCard>
 
           <DetailCard title="Workspace profile">
@@ -149,6 +148,64 @@ export default async function SettingsPage() {
         </section>
       ) : null}
 
+      {workspace && canManageSettings ? (
+        <DetailCard title="Products and services">
+          <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+            <form action={createProductServiceAction} className="grid gap-3 rounded-[0.9rem] border border-[#12212c]/8 bg-white/55 p-3">
+              <input type="hidden" name="workspaceId" value={workspace.id} />
+              <label className="grid gap-1.5 text-sm">
+                Product/service name
+                <input name="name" className="h-10 rounded-[0.78rem] border border-[#12212c]/10 bg-white/70 px-3" />
+              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1.5 text-sm">
+                  SKU
+                  <input name="sku" className="h-10 rounded-[0.78rem] border border-[#12212c]/10 bg-white/70 px-3" />
+                </label>
+                <label className="grid gap-1.5 text-sm">
+                  Category
+                  <input name="category" className="h-10 rounded-[0.78rem] border border-[#12212c]/10 bg-white/70 px-3" />
+                </label>
+                <label className="grid gap-1.5 text-sm">
+                  Unit price
+                  <input name="unitPrice" defaultValue="0" className="h-10 rounded-[0.78rem] border border-[#12212c]/10 bg-white/70 px-3" />
+                </label>
+                <label className="grid gap-1.5 text-sm">
+                  Unit cost
+                  <input name="unitCost" defaultValue="0" className="h-10 rounded-[0.78rem] border border-[#12212c]/10 bg-white/70 px-3" />
+                </label>
+              </div>
+              <label className="grid gap-1.5 text-sm">
+                Description
+                <textarea name="description" rows={2} className="rounded-[0.78rem] border border-[#12212c]/10 bg-white/70 px-3 py-2" />
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm text-[#64707a]">
+                <input type="checkbox" name="taxable" className="h-4 w-4 rounded border-[#12212c]/20" />
+                Taxable
+              </label>
+              <button type="submit" className="w-fit rounded-full bg-[#12212c] px-4 py-2 text-sm font-medium text-white">Add product/service</button>
+            </form>
+            <div className="space-y-2">
+              {products.length ? products.map((product) => (
+                <div key={product.id} className="rounded-[0.82rem] border border-[#12212c]/8 bg-white/60 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold">{product.name}</p>
+                      <p className="mt-1 text-xs text-[#64707a]">{[product.sku, product.category].filter(Boolean).join(" / ") || "No SKU/category"}</p>
+                    </div>
+                    <p className="text-sm font-semibold">{formatCurrency(product.unitPrice)}</p>
+                  </div>
+                  {product.description ? <p className="mt-2 text-sm text-[#64707a]">{product.description}</p> : null}
+                </div>
+              )) : (
+                <div className="rounded-[0.82rem] border border-[#12212c]/8 bg-white/60 p-3 text-sm text-[#64707a]">
+                  Add common services or products here so invoice line items can be standardized later.
+                </div>
+              )}
+            </div>
+          </div>
+        </DetailCard>
+      ) : null}
       {workspace ? (
         <DetailCard title="Workflow status configuration">
           <div className="grid gap-3 lg:grid-cols-3">

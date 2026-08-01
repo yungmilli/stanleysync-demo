@@ -250,24 +250,36 @@ enum NotificationStatus {
 }
 
 model Customer {
-  id          String          @id @default(cuid())
-  customerRef String          @unique
-  company     String
-  mainContact String
-  email       String          @unique
-  phone       String?
-  address     String?
-  notes       String?
-  workspaceId String?
-  labId       String?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  id                     String          @id @default(cuid())
+  customerRef            String          @unique
+  company                String
+  mainContact            String
+  email                  String          @unique
+  phone                  String?
+  address                String?
+  billingEmail           String?
+  billingPhone           String?
+  billingAddress         String?
+  shippingAddress        String?
+  industry               String?
+  accountStatus          String          @default("ACTIVE")
+  paymentTerms           String?
+  preferredContactMethod String?
+  taxExempt              Boolean         @default(false)
+  tags                   Json?
+  internalNotes          String?
+  notes                  String?
+  workspaceId            String?
+  labId                  String?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
   workspace   BusinessWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   lab         Lab?             @relation(fields: [labId], references: [id], onDelete: SetNull)
   quotes      QuoteRequest[]
   workOrderDrafts WorkOrderDraft[]
   tickets     Ticket[]
   invoices    Invoice[]
+  packingSlips PackingSlip[]
   activities  ActivityLog[]
   calAssets   CalAsset[]
   calibrationWorkOrders CalibrationWorkOrder[]
@@ -366,6 +378,7 @@ model Ticket {
   assignedUser  User?          @relation("AssignedTickets", fields: [assignedUserId], references: [id], onDelete: SetNull)
   quote         QuoteRequest?  @relation(fields: [quoteId], references: [id], onDelete: SetNull)
   invoices      Invoice[]
+  packingSlips  PackingSlip[]
   activities    ActivityLog[]
   comments      TicketComment[]
 
@@ -470,6 +483,7 @@ model Invoice {
   ticket                 Ticket?                 @relation(fields: [ticketId], references: [id], onDelete: SetNull)
   calibrationWorkOrder   CalibrationWorkOrder?   @relation(fields: [calibrationWorkOrderId], references: [id], onDelete: SetNull)
   lineItems              InvoiceLineItem[]
+  packingSlips           PackingSlip[]
   activities             ActivityLog[]
 
   @@index([workspaceId])
@@ -484,6 +498,7 @@ model Invoice {
 model InvoiceLineItem {
   id          String   @id @default(cuid())
   invoiceId   String
+  productId   String?
   description String
   quantity    Float    @default(1)
   unitPrice   Float    @default(0)
@@ -495,8 +510,75 @@ model InvoiceLineItem {
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
   invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product     ProductService? @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([invoiceId])
+  @@index([productId])
+  @@index([sortOrder])
+}
+
+model ProductService {
+  id          String   @id @default(cuid())
+  workspaceId String?
+  sku         String?
+  name        String
+  description String?
+  category    String?
+  unitPrice   Float    @default(0)
+  unitCost    Float?
+  taxable     Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  workspace   BusinessWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  invoiceLineItems InvoiceLineItem[]
+
+  @@index([workspaceId])
+  @@index([sku])
+  @@index([isActive])
+}
+
+model PackingSlip {
+  id                String   @id @default(cuid())
+  packingSlipNumber String   @unique
+  workspaceId       String?
+  customerId        String
+  invoiceId         String?
+  ticketId          String?
+  status            String   @default("DRAFT")
+  shipToName        String?
+  shipToAddress     String?
+  shippingMethod    String?
+  trackingNumber    String?
+  shipDate          DateTime?
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  workspace         BusinessWorkspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  customer          Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  invoice           Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  ticket            Ticket?  @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  lineItems         PackingSlipLineItem[]
+
+  @@index([workspaceId])
+  @@index([customerId])
+  @@index([invoiceId])
+  @@index([ticketId])
+}
+
+model PackingSlipLineItem {
+  id            String      @id @default(cuid())
+  packingSlipId String
+  description   String
+  sku           String?
+  partNumber    String?
+  quantity      Float       @default(1)
+  notes         String?
+  sortOrder     Int         @default(0)
+  createdAt     DateTime    @default(now())
+  packingSlip   PackingSlip @relation(fields: [packingSlipId], references: [id], onDelete: Cascade)
+
+  @@index([packingSlipId])
   @@index([sortOrder])
 }
 
@@ -718,6 +800,8 @@ model BusinessWorkspace {
   tickets           Ticket[]
   websiteProjects   WebsiteProject[]
   invoices          Invoice[]
+  products          ProductService[]
+  packingSlips      PackingSlip[]
   assets            CalAsset[]
   procedures        CalibrationProcedure[]
   standards         CalibrationStandard[]

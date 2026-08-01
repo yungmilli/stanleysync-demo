@@ -47,9 +47,14 @@ export default async function InvoiceDetailPage({
           <DetailCard
             title={`${invoice.invoiceNumber} - ${invoice.customer.company}`}
             action={
-              <a href={`/api/invoices/${invoice.id}/pdf`} className="inline-flex rounded-full bg-[#12212c] px-4 py-2 text-sm font-medium text-white">
-                {invoice.status === "PAID" ? "Export Paid Invoice PDF" : "Export Invoice PDF"}
-              </a>
+              <div className="flex flex-wrap gap-2">
+                <a href={`/api/invoices/${invoice.id}/pdf`} className="inline-flex rounded-full bg-[#12212c] px-4 py-2 text-sm font-medium text-white">
+                  {invoice.status === "PAID" ? "Export Paid Invoice PDF" : "Export Invoice PDF"}
+                </a>
+                <a href={`/api/invoices/${invoice.id}/packing-slip`} className="inline-flex rounded-full border border-[#12212c]/10 bg-white px-4 py-2 text-sm font-medium text-[#12212c]">
+                  Export Packing Slip PDF
+                </a>
+              </div>
             }
           >
             <div className="mb-4 flex flex-wrap gap-2">

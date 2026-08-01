@@ -140,6 +140,51 @@ export async function saveWorkspaceBrandingAction(formData: FormData) {
   revalidatePath("/admin/first-run");
 }
 
+
+export async function createProductServiceAction(formData: FormData) {
+  const { user } = await requireAuthenticatedUser();
+  if (!WORKSPACE_SETUP_ROLES.includes(user.role)) return;
+
+  const workspaceId = String(formData.get("workspaceId") ?? "");
+  const workspace = await db.businessWorkspace.findUnique({ where: { id: workspaceId } });
+  if (!workspace || !workspace.isActive) return;
+  if (user.role !== UserRole.SYSTEM_OWNER && workspace.id !== user.activeWorkspaceId) return;
+
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) return;
+  const sku = String(formData.get("sku") ?? "").trim();
+  const unitPrice = Number(formData.get("unitPrice") ?? 0);
+  const unitCost = Number(formData.get("unitCost") ?? 0);
+
+  const product = await db.productService.create({
+    data: {
+      workspaceId: workspace.id,
+      sku: sku || null,
+      name,
+      description: String(formData.get("description") ?? "").trim() || null,
+      category: String(formData.get("category") ?? "").trim() || null,
+      unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
+      unitCost: Number.isFinite(unitCost) ? unitCost : null,
+      taxable: formData.get("taxable") === "on",
+      isActive: formData.get("isActive") !== "off",
+    },
+  });
+
+  await db.auditEvent.create({
+    data: {
+      workspaceId: workspace.id,
+      actorUserId: user.id,
+      actorEmail: user.email,
+      action: "product_service.created",
+      entityType: "ProductService",
+      entityId: product.id,
+      summary: `${name} added to product/service catalog.`,
+    },
+  });
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin/invoices");
+}
 export async function saveFirstRunSetupAction(formData: FormData) {
   await saveWorkspaceBrandingAction(formData);
   redirect("/admin");
