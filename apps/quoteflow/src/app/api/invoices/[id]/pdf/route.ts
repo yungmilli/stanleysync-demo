@@ -25,8 +25,13 @@ export async function GET(
   if (!canExportInvoiceRecord(user, invoice)) {
     return exportErrorResponse(request, "This invoice is not available to your account.", 403);
   }
+
   const paymentDetails = parsePaymentDetails(invoice.paymentInstructions);
   const isPaid = invoice.status === "PAID";
+  const paymentReferenceNotes = invoice.paymentReferenceNotes ?? paymentDetails.notes;
+  const customerNotes = invoice.customerVisibleNotes ?? invoice.notes;
+  const billingAddress = invoice.billingAddress ?? invoice.customer.address;
+  const shippingAddress = invoice.shippingAddress;
 
   const buffer = createProfessionalPdf({
     title: isPaid ? "Invoice - Receipt Copy" : "Invoice",
@@ -37,37 +42,56 @@ export async function GET(
       invoice.customer.mainContact,
       invoice.customer.email,
       invoice.customer.phone,
-      invoice.customer.address,
+      billingAddress,
     ]),
-    meta: [
+    meta: compactRows([
       ["Invoice date", formatDate(invoice.createdAt)],
       ["Due date", formatDate(invoice.dueDate)],
+      ["Payment terms", invoice.paymentTerms ?? "Net 30"],
       ["Payment status", invoice.paymentStatus ?? "UNPAID"],
-      ["Source quote", invoice.quote?.quoteNumber ?? "Not linked"],
-      ["Source job", invoice.ticket?.ticketNumber ?? invoice.calibrationWorkOrder?.woNumber ?? "Not linked"],
-    ],
+      ["Purchase order", invoice.purchaseOrderNumber],
+      ["Source quote", invoice.quote?.quoteNumber],
+      ["Source job", invoice.ticket?.ticketNumber ?? invoice.calibrationWorkOrder?.woNumber],
+      ["Ship date", invoice.shipDate ? formatDate(invoice.shipDate) : null],
+    ]),
     contactBlock: companyContactBlock(invoice.workspace),
     sections: [
       {
         title: "Line Items",
         table: {
-          headers: ["Description", "Qty", "Unit Price", "Amount"],
-          widths: [300, 48, 84, 84],
+          headers: ["Description", "SKU / Part", "Tax", "Qty", "Unit Price", "Amount"],
+          widths: [230, 94, 36, 42, 72, 72],
           rows: invoice.lineItems.length
             ? invoice.lineItems.map((item) => [
-                item.description,
+                compactLines([item.description, item.notes]).join("\n"),
+                compactLines([item.sku ? `SKU ${item.sku}` : null, item.partNumber ? `Part ${item.partNumber}` : null]).join("\n"),
+                item.taxable ? "Yes" : "No",
                 String(item.quantity),
                 formatCurrency(item.unitPrice),
                 formatCurrency(item.amount),
               ])
-            : [["Service work", "1", formatCurrency(invoice.total), formatCurrency(invoice.total)]],
+            : [["Service work", "", "No", "1", formatCurrency(invoice.total), formatCurrency(invoice.total)]],
+        },
+      },
+      {
+        title: "Invoice Notes",
+        table: {
+          headers: ["Field", "Details"],
+          widths: [142, 374],
+          rows: compactRows([
+            ["Customer notes", customerNotes],
+            ["Shipping address", shippingAddress],
+            ["Shipping method", invoice.shippingMethod],
+            ["Tracking number", invoice.trackingNumber],
+            ["Shipping notes", invoice.shippingNotes],
+          ]),
         },
       },
       {
         title: isPaid ? "Payment Proof" : "Payment Instructions",
         table: {
           headers: ["Field", "Details"],
-          widths: [150, 366],
+          widths: [142, 374],
           rows: isPaid
             ? compactRows([
                 ["Payment method", paymentDetails.method],
@@ -76,13 +100,15 @@ export async function GET(
                 ["Payment date", paymentDetails.date || formatDate(invoice.paidAt)],
                 ["Amount paid", formatCurrency(invoice.total)],
                 ["Card last 4", paymentDetails.last4],
-                ["Notes", paymentDetails.notes || invoice.notes],
+                ["Notes", paymentReferenceNotes],
               ])
             : compactRows([
                 ["Payment due date", formatDate(invoice.dueDate)],
-                ["Payment method / link", invoice.paymentUrl ?? invoice.paymentInstructions ?? "Payment details provided by business office"],
+                ["Payment terms", invoice.paymentTerms ?? "Net 30"],
+                ["Payment link", invoice.paymentUrl],
                 ["Provider", invoice.paymentProvider],
-                ["Notes", invoice.notes],
+                ["Payment instructions", invoice.paymentInstructions],
+                ["Payment/reference notes", paymentReferenceNotes],
               ]),
         },
       },
@@ -94,7 +120,7 @@ export async function GET(
       [isPaid ? "Amount paid" : "Total due", formatCurrency(invoice.total)],
     ],
     terms: invoiceTerms(invoice.workspace),
-    signatureLabel: "Received / approved by",
+    signatureLabel: isPaid ? "Receipt acknowledged by" : "Customer authorization",
     footer: documentFooter(invoice.workspace, "Generated by StanleySync"),
     logoUrl: invoice.workspace?.logoUrl,
   });
@@ -106,7 +132,7 @@ function compactLines(values: Array<string | null | undefined>) {
   return values.filter((value): value is string => Boolean(value?.trim()));
 }
 
-function compactRows(rows: Array<[string, string | null | undefined]>) {
+function compactRows(rows: Array<[string, string | null | undefined]>): Array<[string, string]> {
   return rows
     .filter(([, value]) => Boolean(value?.trim()))
     .map(([label, value]) => [label, value ?? ""]);

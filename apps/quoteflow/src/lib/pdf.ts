@@ -116,20 +116,23 @@ function imageCommand(x: number, y: number, width: number, height: number) {
 
 function wrapText(value: string, maxWidth: number, size = 10) {
   const maxChars = Math.max(18, Math.floor(maxWidth / (size * 0.52)));
-  const words = formatLine(value).split(" ");
+  const sourceLines = String(value ?? "").split(/\r?\n/).map(formatLine);
   const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (candidate.length > maxChars && current) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = candidate;
+  for (const sourceLine of sourceLines) {
+    const words = sourceLine.split(" ");
+    let current = "";
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length > maxChars && current) {
+        lines.push(current);
+        current = word;
+      } else {
+        current = candidate;
+      }
     }
+    if (current) lines.push(current);
   }
-  if (current) lines.push(current);
-  return lines;
+  return lines.length ? lines : ["Not provided"];
 }
 
 function fitImage(width: number, height: number, maxWidth: number, maxHeight: number) {

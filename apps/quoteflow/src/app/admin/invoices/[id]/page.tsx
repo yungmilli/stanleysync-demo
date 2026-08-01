@@ -63,6 +63,8 @@ export default async function InvoiceDetailPage({
                 { label: "Phone", value: invoice.customer.phone ?? "Not set" },
                 { label: "Source quote", value: invoice.quote?.quoteNumber ?? "Not linked" },
                 { label: "Source job", value: invoice.ticket?.ticketNumber ?? invoice.calibrationWorkOrder?.woNumber ?? "Not linked" },
+                { label: "PO / reference", value: invoice.purchaseOrderNumber ?? "Not set" },
+                { label: "Billing address", value: invoice.billingAddress ?? invoice.customer.address ?? "Not set" },
                 { label: "Created", value: formatDateTime(invoice.createdAt) },
               ]}
             />
@@ -82,7 +84,14 @@ export default async function InvoiceDetailPage({
                 <tbody>
                   {invoice.lineItems.map((item) => (
                     <tr key={item.id} className="border-t border-[#12212c]/8 bg-white/40">
-                      <td className="px-3 py-3">{item.description}</td>
+                      <td className="px-3 py-3">
+                        <p className="font-medium text-[#12212c]">{item.description}</p>
+                        {item.sku || item.partNumber || item.notes ? (
+                          <p className="mt-1 text-xs leading-5 text-[#64707a]">
+                            {[item.sku ? `SKU ${item.sku}` : null, item.partNumber ? `Part ${item.partNumber}` : null, item.notes].filter(Boolean).join(" | ")}
+                          </p>
+                        ) : null}
+                      </td>
                       <td className="px-3 py-3 text-right">{item.quantity}</td>
                       <td className="px-3 py-3 text-right">{formatCurrency(item.unitPrice)}</td>
                       <td className="px-3 py-3 text-right font-semibold">{formatCurrency(item.amount)}</td>
@@ -100,10 +109,12 @@ export default async function InvoiceDetailPage({
           </DetailCard>
 
           <DetailCard title="Notes and payment">
-            <p className="text-sm leading-6 text-[#64707a]">{invoice.notes ?? "No invoice notes."}</p>
-            <p className="mt-3 text-sm leading-6 text-[#64707a]">
-              {invoice.paymentInstructions ?? "Payment due within 30 days. Confirm ACH, card, or check details before sending."}
-            </p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <NoteBlock label="Customer notes" value={invoice.customerVisibleNotes ?? invoice.notes} fallback="No customer-facing invoice notes." />
+              <NoteBlock label="Payment terms" value={invoice.paymentTerms ?? invoice.paymentInstructions} fallback="Payment due within 30 days." />
+              <NoteBlock label="Payment/reference notes" value={invoice.paymentReferenceNotes} fallback="No payment reference notes." />
+              <NoteBlock label="Shipping notes" value={invoice.shippingNotes} fallback="No shipping notes." />
+            </div>
             {invoice.paymentUrl ? (
               <div className="mt-3 rounded-[0.82rem] border border-[#12212c]/10 bg-white/70 p-3">
                 <p className="text-xs uppercase tracking-[0.1em] text-[#64707a]">Payment link</p>
@@ -161,6 +172,18 @@ export default async function InvoiceDetailPage({
                 <CurrencyField name="tax" label="Tax" defaultValue={invoice.tax} />
                 <CurrencyField name="discount" label="Discount" defaultValue={invoice.discount} />
               </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <TextField name="purchaseOrderNumber" label="PO / reference" defaultValue={invoice.purchaseOrderNumber} />
+                <TextField name="paymentTerms" label="Payment terms" defaultValue={invoice.paymentTerms} placeholder="Net 30" />
+                <TextField name="billingAddress" label="Billing address" defaultValue={invoice.billingAddress ?? invoice.customer.address} />
+                <TextField name="shippingAddress" label="Shipping address" defaultValue={invoice.shippingAddress} />
+                <TextField name="shippingMethod" label="Shipping method" defaultValue={invoice.shippingMethod} />
+                <TextField name="trackingNumber" label="Tracking number" defaultValue={invoice.trackingNumber} />
+                <label className="block text-sm">
+                  <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Ship date</span>
+                  <input type="date" name="shipDate" defaultValue={invoice.shipDate ? invoice.shipDate.toISOString().slice(0, 10) : ""} className="h-10 w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3" />
+                </label>
+              </div>
               <div className="space-y-2 rounded-[0.9rem] border border-[#12212c]/8 bg-white/55 p-3">
                 <p className="text-sm font-semibold">Line items</p>
                 {invoice.lineItems.map((item) => (
@@ -171,18 +194,38 @@ export default async function InvoiceDetailPage({
                       <input name="lineItemDescription" defaultValue={item.description} className="h-9 rounded-[0.7rem] border border-[#12212c]/10 bg-white px-2.5 text-sm text-[#12212c]" />
                     </label>
                     <div className="grid gap-2 sm:grid-cols-2">
+                      <TextField name="lineItemSku" label="SKU" defaultValue={item.sku} compact />
+                      <TextField name="lineItemPartNumber" label="Part number" defaultValue={item.partNumber} compact />
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
                       <label className="grid gap-1 text-xs text-[#64707a]">
                         Qty
                         <input name="lineItemQuantity" defaultValue={item.quantity} className="h-9 rounded-[0.7rem] border border-[#12212c]/10 bg-white px-2.5 text-sm text-[#12212c]" />
                       </label>
                       <CurrencyField name="lineItemUnitPrice" label="Unit price" defaultValue={item.unitPrice} compact />
                     </div>
+                    <label className="inline-flex items-center gap-2 text-xs text-[#64707a]">
+                      <input type="checkbox" name="lineItemTaxable" value={item.id} defaultChecked={item.taxable} className="h-4 w-4 rounded border-[#12212c]/20" />
+                      Taxable line item
+                    </label>
+                    <label className="grid gap-1 text-xs text-[#64707a]">
+                      Line item notes
+                      <input name="lineItemNotes" defaultValue={item.notes ?? ""} className="h-9 rounded-[0.7rem] border border-[#12212c]/10 bg-white px-2.5 text-sm text-[#12212c]" />
+                    </label>
                   </div>
                 ))}
               </div>
               <label className="block text-sm">
-                <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Invoice notes</span>
-                <textarea name="notes" defaultValue={invoice.notes ?? ""} rows={3} className="w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 py-2" />
+                <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Customer-facing invoice notes</span>
+                <textarea name="customerVisibleNotes" defaultValue={invoice.customerVisibleNotes ?? invoice.notes ?? ""} rows={3} className="w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 py-2" />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Internal notes</span>
+                <textarea name="internalNotes" defaultValue={invoice.internalNotes ?? ""} rows={3} className="w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 py-2" />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Shipping notes</span>
+                <textarea name="shippingNotes" defaultValue={invoice.shippingNotes ?? ""} rows={2} className="w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 py-2" />
               </label>
               <div className="mt-4 space-y-3 rounded-[0.9rem] border border-[#12212c]/8 bg-white/55 p-3">
                 <p className="text-sm font-semibold">Payment link</p>
@@ -233,7 +276,7 @@ export default async function InvoiceDetailPage({
                 </div>
                 <label className="block text-sm">
                   <span className="mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]">Payment/reference notes</span>
-                  <textarea name="paymentNotes" defaultValue={paymentDetails.notes || invoice.paymentInstructions || ""} rows={3} className="w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 py-2" />
+                  <textarea name="paymentReferenceNotes" defaultValue={invoice.paymentReferenceNotes ?? paymentDetails.notes ?? ""} rows={3} className="w-full rounded-[0.8rem] border border-[#12212c]/10 bg-white/70 px-3 py-2" />
                 </label>
               </div>
             </SafeEditForm>
@@ -272,7 +315,7 @@ export default async function InvoiceDetailPage({
                   { label: "Payment date", value: paymentDetails.date || formatDate(invoice.paidAt) },
                   { label: "Reference", value: paymentDetails.reference || "Not set" },
                   { label: "Payment status", value: normalizePaymentStatus(invoice.paymentStatus) },
-                  { label: "Notes", value: paymentDetails.notes || "Not set" },
+                  { label: "Notes", value: invoice.paymentReferenceNotes ?? paymentDetails.notes ?? "Not set" },
                 ]}
               />
             </div>
@@ -300,6 +343,28 @@ function Row({ label, value, strong }: { label: string; value: string; strong?: 
   );
 }
 
+function NoteBlock({ label, value, fallback }: { label: string; value?: string | null; fallback: string }) {
+  return (
+    <div className="rounded-[0.82rem] border border-[#12212c]/8 bg-white/60 p-3">
+      <p className="text-xs uppercase tracking-[0.1em] text-[#64707a]">{label}</p>
+      <p className="mt-1 whitespace-pre-line text-sm leading-6 text-[#12212c]">{value?.trim() || fallback}</p>
+    </div>
+  );
+}
+
+function TextField({ name, label, defaultValue, placeholder, compact }: { name: string; label: string; defaultValue?: string | null; placeholder?: string; compact?: boolean }) {
+  return (
+    <label className={compact ? "grid gap-1 text-xs text-[#64707a]" : "block text-sm"}>
+      <span className={compact ? "" : "mb-1.5 block text-xs uppercase tracking-[0.1em] text-[#64707a]"}>{label}</span>
+      <input
+        name={name}
+        defaultValue={defaultValue ?? ""}
+        placeholder={placeholder}
+        className={`${compact ? "h-9 rounded-[0.7rem] bg-white text-sm" : "h-10 rounded-[0.8rem] bg-white/70"} w-full border border-[#12212c]/10 px-3 text-[#12212c]`}
+      />
+    </label>
+  );
+}
 function CurrencyField({ name, label, defaultValue, compact }: { name: string; label: string; defaultValue?: number | null; compact?: boolean }) {
   return (
     <label className="block text-sm">

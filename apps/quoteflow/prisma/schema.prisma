@@ -445,6 +445,17 @@ model Invoice {
   total                  Float                   @default(0)
   dueDate                DateTime?
   notes                  String?
+  customerVisibleNotes   String?
+  internalNotes          String?
+  paymentReferenceNotes  String?
+  shippingNotes          String?
+  billingAddress         String?
+  shippingAddress        String?
+  purchaseOrderNumber    String?
+  shippingMethod         String?
+  trackingNumber         String?
+  shipDate               DateTime?
+  paymentTerms           String?
   paymentUrl             String?
   paymentStatus          String                  @default("UNPAID")
   paymentProvider        String?
@@ -477,6 +488,10 @@ model InvoiceLineItem {
   quantity    Float    @default(1)
   unitPrice   Float    @default(0)
   amount      Float    @default(0)
+  sku         String?
+  partNumber  String?
+  taxable     Boolean  @default(false)
+  notes       String?
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
   invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)

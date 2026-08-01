@@ -54,7 +54,12 @@ export default async function UsersAndRolesPage({ searchParams }: UsersPageProps
 
   const [users, workspaces] = await Promise.all([
     db.user.findMany({
-      where: isSystemOwner ? undefined : { activeWorkspaceId: user.activeWorkspaceId ?? "__none__" },
+      where: isSystemOwner
+        ? undefined
+        : {
+            activeWorkspaceId: user.activeWorkspaceId ?? "__none__",
+            role: { not: UserRole.SYSTEM_OWNER },
+          },
       orderBy: [{ isActive: "desc" }, { role: "asc" }, { name: "asc" }],
       include: { activeWorkspace: true },
     }).catch((error) => {
@@ -86,6 +91,11 @@ export default async function UsersAndRolesPage({ searchParams }: UsersPageProps
         {saved ? (
           <div className="mt-3 rounded-[0.85rem] border border-emerald-500/20 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
             Saved user changes.
+          </div>
+        ) : null}
+        {!isSystemOwner ? (
+          <div className="mt-3 rounded-[0.85rem] border border-[#12212c]/10 bg-white/60 px-3 py-2 text-sm text-[#64707a]">
+            Workspace users only. System Owner accounts and cross-workspace admin controls are hidden.
           </div>
         ) : null}
       </DetailCard>

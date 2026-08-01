@@ -700,6 +700,10 @@ function calculateInvoiceTotals(items: Array<{ quantity: number; unitPrice: numb
   return { subtotal, total: finalTotal };
 }
 
+function cleanInvoiceDescription(parts: Array<string | null | undefined>) {
+  return parts.map((part) => part?.trim()).filter(Boolean).join(" - ") || "Service work";
+}
+
 export async function createInvoiceFromQuoteAction(formData: FormData) {
   const { session } = await requireManagerSession();
   const quoteId = String(formData.get("quoteId"));
@@ -723,12 +727,14 @@ export async function createInvoiceFromQuoteAction(formData: FormData) {
       subtotal: totals.subtotal,
       total: totals.total,
       dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      notes: quote.adminNotes ?? quote.aiSummary,
+      customerVisibleNotes: quote.issueDescription ?? quote.aiSummary,
+      internalNotes: quote.adminNotes,
+      paymentTerms: "Net 30",
       paymentInstructions: "Payment due within 30 days. Confirm ACH, card, or check details before sending.",
       lineItems: {
         create: [
           {
-            description: quote.equipmentType ? `Quoted service - ${quote.equipmentType}` : `Quoted service - ${quote.quoteNumber}`,
+            description: cleanInvoiceDescription(["Quoted service", quote.serviceType, quote.equipmentType ?? quote.issueDescription]),
             quantity: 1,
             unitPrice: amount,
             amount,
@@ -789,12 +795,14 @@ export async function createInvoiceFromTicketAction(formData: FormData) {
       subtotal: totals.subtotal,
       total: totals.total,
       dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      notes: ticket.notes,
+      customerVisibleNotes: ticket.notes,
+      internalNotes: ticket.quote?.adminNotes,
+      paymentTerms: "Net 30",
       paymentInstructions: "Payment due within 30 days. Confirm ACH, card, or check details before sending.",
       lineItems: {
         create: [
           {
-            description: `Completed job - ${ticket.ticketNumber}`,
+            description: cleanInvoiceDescription(["Completed job", ticket.type, ticket.notes ?? ticket.ticketNumber]),
             quantity: 1,
             unitPrice: amount,
             amount,
@@ -859,12 +867,13 @@ export async function createInvoiceFromCalibrationWorkOrderAction(formData: Form
       subtotal: totals.subtotal,
       total: totals.total,
       dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      notes: workOrder.certificateNotes ?? workOrder.intakeNotes,
+      customerVisibleNotes: workOrder.certificateNotes ?? workOrder.intakeNotes,
+      paymentTerms: "Net 30",
       paymentInstructions: "Payment due within 30 days. Confirm ACH, card, or check details before sending.",
       lineItems: {
         create: [
           {
-            description: `Calibration work order - ${workOrder.woNumber}`,
+            description: cleanInvoiceDescription(["Calibration work order", workOrder.serviceType, workOrder.woNumber]),
             quantity: 1,
             unitPrice: amount,
             amount,
@@ -911,6 +920,17 @@ export async function updateInvoiceStatusAction(formData: FormData) {
   const status = String(formData.get("status")) as InvoiceStatus;
   const dueDate = formData.has("dueDate") ? optionalDate(formData.get("dueDate")) : undefined;
   const notes = formData.has("notes") ? optionalString(formData.get("notes")) : undefined;
+  const customerVisibleNotes = formData.has("customerVisibleNotes") ? optionalString(formData.get("customerVisibleNotes")) : undefined;
+  const internalNotes = formData.has("internalNotes") ? optionalString(formData.get("internalNotes")) : undefined;
+  const paymentReferenceNotes = formData.has("paymentReferenceNotes") ? optionalString(formData.get("paymentReferenceNotes")) : undefined;
+  const shippingNotes = formData.has("shippingNotes") ? optionalString(formData.get("shippingNotes")) : undefined;
+  const billingAddress = formData.has("billingAddress") ? optionalString(formData.get("billingAddress")) : undefined;
+  const shippingAddress = formData.has("shippingAddress") ? optionalString(formData.get("shippingAddress")) : undefined;
+  const purchaseOrderNumber = formData.has("purchaseOrderNumber") ? optionalString(formData.get("purchaseOrderNumber")) : undefined;
+  const shippingMethod = formData.has("shippingMethod") ? optionalString(formData.get("shippingMethod")) : undefined;
+  const trackingNumber = formData.has("trackingNumber") ? optionalString(formData.get("trackingNumber")) : undefined;
+  const shipDate = formData.has("shipDate") ? optionalDate(formData.get("shipDate")) : undefined;
+  const paymentTerms = formData.has("paymentTerms") ? optionalString(formData.get("paymentTerms")) : undefined;
   const paymentUrl = formData.has("paymentUrl") ? optionalString(formData.get("paymentUrl")) : undefined;
   const paymentProvider = formData.has("paymentProvider") ? optionalString(formData.get("paymentProvider")) : undefined;
   const requestedPaymentStatus = formData.has("paymentStatus") ? optionalString(formData.get("paymentStatus")) : undefined;
@@ -919,13 +939,17 @@ export async function updateInvoiceStatusAction(formData: FormData) {
   const paymentCardLast4 = optionalString(formData.get("paymentCardLast4"));
   const paymentDate = optionalString(formData.get("paymentDate"));
   const paymentReference = optionalString(formData.get("paymentReference"));
-  const paymentNotes = optionalString(formData.get("paymentNotes"));
+  const paymentNotes = optionalString(formData.get("paymentNotes")) ?? (paymentReferenceNotes === undefined ? null : paymentReferenceNotes);
   const tax = formData.has("tax") ? optionalNumber(formData.get("tax")) ?? 0 : undefined;
   const discount = formData.has("discount") ? optionalNumber(formData.get("discount")) ?? 0 : undefined;
   const lineItemIds = formData.getAll("lineItemId").map(String);
   const lineItemDescriptions = formData.getAll("lineItemDescription");
   const lineItemQuantities = formData.getAll("lineItemQuantity");
   const lineItemUnitPrices = formData.getAll("lineItemUnitPrice");
+  const lineItemSkus = formData.getAll("lineItemSku");
+  const lineItemPartNumbers = formData.getAll("lineItemPartNumber");
+  const lineItemTaxableFlags = new Set(formData.getAll("lineItemTaxable").map(String));
+  const lineItemNotes = formData.getAll("lineItemNotes");
   const invoice = await db.invoice.findUnique({
     where: { id: invoiceId },
     include: { ticket: true, calibrationWorkOrder: true, lineItems: true },
@@ -948,6 +972,10 @@ export async function updateInvoiceStatusAction(formData: FormData) {
       quantity,
       unitPrice,
       amount: quantity * unitPrice,
+      sku: optionalString(lineItemSkus[index] ?? null),
+      partNumber: optionalString(lineItemPartNumbers[index] ?? null),
+      taxable: lineItemTaxableFlags.has(id),
+      notes: optionalString(lineItemNotes[index] ?? null),
     }];
   });
   const nextSubtotal = lineItemUpdates.length > 0
@@ -986,6 +1014,10 @@ export async function updateInvoiceStatusAction(formData: FormData) {
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           amount: item.amount,
+          sku: item.sku,
+          partNumber: item.partNumber,
+          taxable: item.taxable,
+          notes: item.notes,
         },
       }),
     ),
@@ -996,6 +1028,17 @@ export async function updateInvoiceStatusAction(formData: FormData) {
         subtotal: nextSubtotal,
         dueDate: dueDate === undefined ? invoice.dueDate : dueDate,
         notes: notes === undefined ? invoice.notes : notes,
+        customerVisibleNotes: customerVisibleNotes === undefined ? invoice.customerVisibleNotes : customerVisibleNotes,
+        internalNotes: internalNotes === undefined ? invoice.internalNotes : internalNotes,
+        paymentReferenceNotes: paymentReferenceNotes === undefined ? invoice.paymentReferenceNotes : paymentReferenceNotes,
+        shippingNotes: shippingNotes === undefined ? invoice.shippingNotes : shippingNotes,
+        billingAddress: billingAddress === undefined ? invoice.billingAddress : billingAddress,
+        shippingAddress: shippingAddress === undefined ? invoice.shippingAddress : shippingAddress,
+        purchaseOrderNumber: purchaseOrderNumber === undefined ? invoice.purchaseOrderNumber : purchaseOrderNumber,
+        shippingMethod: shippingMethod === undefined ? invoice.shippingMethod : shippingMethod,
+        trackingNumber: trackingNumber === undefined ? invoice.trackingNumber : trackingNumber,
+        shipDate: shipDate === undefined ? invoice.shipDate : shipDate,
+        paymentTerms: paymentTerms === undefined ? invoice.paymentTerms : paymentTerms,
         paymentUrl: paymentUrl === undefined ? invoice.paymentUrl : paymentUrl,
         paymentProvider: paymentProvider === undefined ? invoice.paymentProvider : paymentProvider,
         paymentInstructions: nextPaymentInstructions,
